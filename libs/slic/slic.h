@@ -19,14 +19,6 @@
 #include <math.h>
 #include <vector>
 #include <float.h>
-using namespace std;
-
-/* 2d matrices are handled by 2d vectors. */
-#define vec2dd vector<vector<double> >
-#define vec2di vector<vector<int> >
-#define vec2db vector<vector<bool> >
-/* The number of iterations run by the clustering algorithm. */
-#define NR_ITERATIONS 10
 
 /*
  * class Slic.
@@ -36,43 +28,71 @@ using namespace std;
  * distance parameter.
  */
 class Slic {
+	public:
+		/* 2d matrices are handled by 2d vectors. */
+		using vec2dd = std::vector<std::vector<double>>;
+		using vec2di = std::vector<std::vector<int>>;
+		using vec2db = std::vector<std::vector<bool>>;
+		
+		/* The number of iterations run by the clustering algorithm. */
+		static const unsigned int NR_ITERATIONS = 10;
+
     private:
         /* The cluster assignments and distance values for each pixel. */
-        vec2di clusters;
-        vec2dd distances;
+        cv::Mat1i clusters;
+        cv::Mat1d distances;
         
         /* The LAB and xy values of the centers. */
-        vec2dd centers;
-        /* The number of occurences of each center. */
-        vector<int> center_counts;
+		struct center_t {
+			cv::Vec3d color;
+			cv::Point2i coord;
+		};
+		std::vector<center_t> centers;
+        /* The number of occurrences of each center. */
+        std::vector<int> center_counts;
         
-        /* The step size per cluster, and the colour (nc) and distance (ns)
+        /* The step size per cluster, and the color (nc) and distance (ns)
          * parameters. */
         int step, nc, ns;
         
         /* Compute the distance between a center and an individual pixel. */
-        double compute_dist(int ci, CvPoint pixel, CvScalar colour);
+        double compute_dist(int ci, cv::Point pixel, cv::Vec3d colour);
         /* Find the pixel with the lowest gradient in a 3x3 surrounding. */
-        CvPoint find_local_minimum(IplImage *image, CvPoint center);
+		CvPoint find_local_minimum(cv::Mat3d& image, const cv::Point2i center);
         
-        /* Remove and initialize the 2d vectors. */
-        void clear_data();
-        void init_data(IplImage *image);
+		// Clear the data as saved by the algorithm.
+        void clear_data()
+		{
+			clusters.release();
+			distances.release();
+			centers.clear();
+			center_counts.clear();
+		}
+
+		/*
+		* Initialize the cluster centers and initial values of the pixel-wise cluster
+		* assignment and distance values.
+		*
+		* Input : The image (IplImage*).
+		* Output: -
+		*/
+        void init_data(cv::Mat3d& image);
+
 
     public:
-        /* Class constructors and deconstructors. */
-        Slic();
-        ~Slic();
+        // Class constructors and destructors.
+		Slic(){}
+		~Slic(){}
         
-        /* Generate an over-segmentation for an image. */
-        void generate_superpixels(IplImage *image, int step, int nc);
-        /* Enforce connectivity for an image. */
-        void create_connectivity(IplImage *image);
+        // Generate an over-segmentation for an image.
+		void generate_superpixels(cv::Mat3d& image, int step, int nc);
+        // Enforce connectivity for an image.
+		void create_connectivity(cv::Mat3d& image);
         
-        /* Draw functions. Resp. displayal of the centers and the contours. */
-        void display_center_grid(IplImage *image, CvScalar colour);
-        void display_contours(IplImage *image, CvScalar colour);
-        void colour_with_cluster_means(IplImage *image);
+        // Draw functions.
+		void display_center_grid(cv::Mat3d& image, CvScalar colour);
+		void display_contours(cv::Mat3d& image, cv::Vec3d colour, const double scale = 1.0);
+        void colour_with_cluster_means(cv::Mat3d& image);
 };
 
 #endif

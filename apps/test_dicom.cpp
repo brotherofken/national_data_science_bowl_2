@@ -53,5 +53,7 @@ int main(int argc, char *argv[])
 	cv::imshow("", image);
 	cv::waitKey(0);
 
+	cv::imwrite("1.png", 255*image);
+
 	return 0;
 }
