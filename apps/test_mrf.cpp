@@ -1,7 +1,8 @@
 #include <iostream>
 #include <iomanip>
+#include <array>
 
-#include "mrf/graph.h"
+#include <mrf/graph.h>
 #include <opencv2/opencv.hpp>
 
 template <typename T>
