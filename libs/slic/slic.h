@@ -44,6 +44,7 @@ class Slic {
         
         /* The LAB and xy values of the centers. */
 		struct center_t {
+			size_t id;
 			cv::Vec3d color;
 			cv::Point2i coord;
 		};
@@ -56,9 +57,9 @@ class Slic {
         int step, nc, ns;
         
         /* Compute the distance between a center and an individual pixel. */
-        double compute_dist(int ci, cv::Point pixel, cv::Vec3d colour);
+		double compute_dist(const center_t c, cv::Point pixel, cv::Vec3d colour);
         /* Find the pixel with the lowest gradient in a 3x3 surrounding. */
-		CvPoint find_local_minimum(cv::Mat3d& image, const cv::Point2i center);
+		cv::Point find_local_minimum(cv::Mat1d& image, const cv::Point2i center, const int r = 5);
         
 		// Clear the data as saved by the algorithm.
         void clear_data()
@@ -85,7 +86,7 @@ class Slic {
 		~Slic(){}
         
         // Generate an over-segmentation for an image.
-		void generate_superpixels(cv::Mat3d& image, int step, int nc);
+		void generate_superpixels(cv::Mat3d& image, const int superpixel_num, const int nc);
         // Enforce connectivity for an image.
 		void create_connectivity(cv::Mat3d& image);
         

@@ -4,141 +4,134 @@
 
 void Slic::init_data(cv::Mat3d& image)
 {
-	/* Initialize the cluster and distance matrices. */
+	// Initialize the cluster and distance matrices.
 	clusters = cv::Mat1i(image.size(), -1);
 	distances = cv::Mat1d(image.size(), std::numeric_limits<double>::max());
-
-	/* Initialize the centers and counters. */
+	
+	// Calculate gradient magnitude
+	cv::Mat1d image_grad;
+	{
+		cv::Mat1d image_gray;
+		cv::extractChannel(image, image_gray, 0);
+		cv::Mat1d image_dx, image_dy;
+		cv::Sobel(image_gray, image_dx, CV_64F, 1, 0);
+		cv::Sobel(image_gray, image_dy, CV_64F, 0, 1);
+		cv::magnitude(image_dx, image_dy, image_grad);
+	}
+	
+	// Initialize the centers and counters.
 	for (int i = step; i < image.cols - step / 2; i += step) {
 		for (int j = step; j < image.rows - step / 2; j += step) {
-			/* Find the local minimum (gradient-wise). */
-			cv::Point2i nc = find_local_minimum(image, cvPoint(i, j));
+			// Find the local minimum (gradient-wise).
+			cv::Point2i nc = find_local_minimum(image_grad, cvPoint(i, j));
 			cv::Vec3d colour = image(nc.y, nc.x);
 
-			/* Append to vector of centers. */
+			// Append to vector of centers.
 			centers.push_back({
+				centers.size(),
 				{ colour[0], colour[1], colour[2] },
 				{ nc.x, nc.y }
 			});
 			center_counts.push_back(0);
 		}
 	}
-}
 
-/*
- * Compute the distance between a cluster center and an individual pixel.
- * Input : The cluster index (int), the pixel (CvPoint), and the Lab values of
- *         the pixel (CvScalar).
- * Output: The distance (double).
- */
-double Slic::compute_dist(int ci, cv::Point pixel, cv::Vec3d color) {
-	const double dc = cv::norm(centers[ci].color - color); 
-	const double ds = cv::norm(centers[ci].coord - pixel);
-	return std::sqrt(std::pow(dc / nc, 2) + std::pow(ds / ns, 2));
-}
-
-/*
- * Find a local gradient minimum of a pixel in a 3x3 neighborhood. This
- * method is called upon initialization of the cluster centers.
- *
- * Input : The image (IplImage*) and the pixel center (CvPoint).
- * Output: The local gradient minimum (cv::Point2i).
- */
-CvPoint Slic::find_local_minimum(cv::Mat3d& image, const cv::Point2i center) {
-    double min_grad = std::numeric_limits<double>::max();
-    cv::Point2i loc_min = center;
-    
-    for (int x = center.x-1; x < center.x+2; x++) {
-        for (int y = center.y-1; y < center.y+2; y++) {
-            cv::Vec3d c1 = image(y + 1, x);
-            cv::Vec3d c2 = image(y, x + 1);
-            cv::Vec3d c3 = image(y, x);
-            // Convert colour values to grayscale values.
-            double i1 = c1[0]; // Lab - first channel
-            double i2 = c2[0]; // Lab - first channel
-            double i3 = c3[0]; // Lab - first channel
-            //double i1 = c1.val[0] * 0.11 + c1.val[1] * 0.59 + c1.val[2] * 0.3;
-            //double i2 = c2.val[0] * 0.11 + c2.val[1] * 0.59 + c2.val[2] * 0.3;
-            //double i3 = c3.val[0] * 0.11 + c3.val[1] * 0.59 + c3.val[2] * 0.3;
-            
-            // Compute horizontal and vertical gradients and keep track of the minimum.
-            if (std::sqrt(std::pow(i1 - i3, 2)) + std::sqrt(std::pow(i2 - i3,2)) < min_grad) {
-				min_grad = std::abs(i1 - i3) + std::abs(i2 - i3);
-				loc_min = cv::Point(x, y);
-            }
-        }
-    }
-    
-    return loc_min;
 }
 
 
-/*
- * Compute the over-segmentation based on the step-size and relative weighting
- * of the pixel and colour values.
- *
- * Input : The Lab image (IplImage*), the stepsize (int), and the weight (int).
- * Output: -
- */
+// Compute the distance between a cluster center and an individual pixel.
+double Slic::compute_dist(const center_t c, cv::Point pixel, cv::Vec3d color) {
+	const double color_dist = cv::norm(c.color - color); 
+	const double plane_dist = cv::norm(c.coord - pixel);
+	// TODO: formula slightly differs from paper, check later
+	return std::sqrt(std::pow(color_dist / nc, 2) + std::pow(plane_dist / ns, 2));
+}
 
-void Slic::generate_superpixels(cv::Mat3d& image, int step, int nc) {
-    this->step = step;
+
+// Find a local gradient minimum of a pixel neighborhood. 
+// This method is called during initialization of cluster centers.
+cv::Point Slic::find_local_minimum(cv::Mat1d& image, const cv::Point2i center, const int r /*= 5*/) {
+    double min_value = std::numeric_limits<double>::max();
+    cv::Point min_location = center;
+
+	const cv::Rect roi(center.x - r, center.y - r, 2 * r, 2 * r);
+	cv::minMaxLoc(image(roi), &min_value, nullptr, &min_location);
+	return min_location + roi.tl();
+}
+
+
+// Compute the over-segmentation based on the step-size and relative weighting
+// of the pixel and colour values.
+void Slic::generate_superpixels(cv::Mat3d& image, const int superpixel_num, const int nc) {
+	this->step = std::sqrt(image.total() / double(superpixel_num));
     this->nc = nc;
     this->ns = step;
     
-    /* Clear previous data (if any), and re-initialize it. */
+    // Clear previous data (if any), and re-initialize it.
     clear_data();
     init_data(image);
+
+	const cv::Rect image_rect(cv::Point(0, 0), image.size());
     
-    /* Run EM for 10 iterations (as prescribed by the algorithm). */
+    // Run EM iterations
     for (int iter = 0; iter < NR_ITERATIONS; iter++) {
-        /* Reset distance values. */
+
+#if 1
+		// Visualization
+		{
+			cv::Mat1d gray;
+			cv::extractChannel(image, gray, 0);
+			cv::Mat3d img;
+			cv::merge(std::vector<cv::Mat1d>(3, gray), img);
+
+			this->display_contours(img, cv::Vec3d(0, 0, 255), 3.0);
+			for (const auto& c : centers) {
+				cv::circle(img, c.coord, 1, cv::Scalar(0, 255, 0), 1);
+			}
+			cv::imshow("init", img / 255);
+			cv::waitKey(1);
+		}
+#endif
+
+        // Reset distance values
 		distances = cv::Mat1d(image.size(), std::numeric_limits<double>::max());
 
-        for (int ci = 0; ci < int(centers.size()); ci++) {
-            /* Only compare to pixels in a 2 x step by 2 x step region. */
-            for (int x = centers[ci].coord.x - step; x < centers[ci].coord.x + step; ++x) {
-				for (int y = centers[ci].coord.y - step; y < centers[ci].coord.y + step; ++y) {
-                
-                    if (x >= 0 && x < image.cols && y >= 0 && y < image.rows) {
+        for (const center_t center : centers) {
+            // Compare to pixels in a 2 x step by 2 x step region
+			for (int x = center.coord.x - step*1.5; x < center.coord.x + step*1.5; ++x) {
+				for (int y = center.coord.y - step*1.5; y < center.coord.y + step*1.5; ++y) {
+					if (image_rect.contains(cv::Point(x, y))) {
                         const cv::Vec3d color = image(y, x);
-                        const double d = compute_dist(ci, cvPoint(x, y), color);
-                        
-                        // Update cluster allocation if the cluster minimizes the distance.
+                        const double d = compute_dist(center, cv::Point(x, y), color);                        
+                        // Update cluster allocation if the cluster minimizes the distance
                         if (d < distances(y, x)) {
                             distances(y, x) = d;
-                            clusters(y, x) = ci;
+							clusters(y, x) = center.id;
                         }
                     }
                 }
             }
         }
         
-        // Clear the center values.
-        for (int ci = 0; ci < int(centers.size()); ++ci) {
-			centers[ci] = { { 0, 0, 0 }, { 0, 0 } };// [0] = centers[j][1] = centers[j][2] = centers[j][3] = centers[j][4] = 0;
-            center_counts[ci] = 0;
-        }
+        // Clear the center values
+		centers = std::vector<center_t>(centers.size(), { 0, { 0, 0, 0 }, { 0, 0 } });
+		center_counts = std::vector<int>(centers.size(), 0);
         
-        /* Compute the new cluster centers. */
-        for (int x = 0; x < image.cols; ++x) {
-            for (int y = 0; y < image.rows; ++y) {
-                int c_id = clusters(y, x);
-                if (c_id != -1) {
-					centers[c_id].color += image(y, x);
-                    centers[c_id].coord += cv::Point(x, y);
-                    center_counts[c_id]++;
-                }
-            }
-        }
+        // Compute new cluster centers
+		for (auto it = image.begin(); it != image.end(); ++it) {
+			const int c_id = clusters(it.pos());
+			if (c_id != -1) {
+				centers[c_id].color += image(it.pos());
+				centers[c_id].coord += it.pos();
+				center_counts[c_id]++;
+			}
+		}
 
-        /* Normalize the clusters. */
-        for (int ci = 0; ci < int(centers.size()); ci++) {
-			centers[ci].color[0] /= center_counts[ci];
-			centers[ci].color[1] /= center_counts[ci];
-			centers[ci].color[2] /= center_counts[ci];
-			centers[ci].coord.x  /= center_counts[ci];
-			centers[ci].coord.y  /= center_counts[ci];
+        // Normalize the cluster
+        for (size_t ci = 0; ci < centers.size(); ++ci) {
+			centers[ci].id = ci;
+			centers[ci].color /= center_counts[ci]; // TODO: division by zero?
+			centers[ci].coord /= center_counts[ci];
         }
     }
 }
@@ -220,70 +213,52 @@ void Slic::display_center_grid(cv::Mat3d& image, CvScalar colour) {
     }
 }
 
-/*
- * Display a single pixel wide contour around the clusters.
- *
- * Input : The target image (IplImage*) and contour colour (CvScalar).
- * Output: -
- */
+
+// Display a single pixel wide contour around the clusters.
 void Slic::display_contours(cv::Mat3d& image, cv::Vec3d colour, const double scale /*= 1.0*/) {
     const int dx8[8] = {-1, -1,  0,  1, 1, 1, 0, -1};
 	const int dy8[8] = { 0, -1, -1, -1, 0, 1, 1,  1};
 	
-	/* Initialize the contour vector and the matrix detailing whether a pixel
-	 * is already taken to be a contour. */
+	// Initialize the contour vector and the matrix detailing whether a pixel is already taken to be a contour
 	std::vector<cv::Point> contours;
 	cv::Mat1b istaken(image.size(), 0);
-	//for (int i = 0; i < image.cols; i++) { 
-	//	std::vector<bool> nb;
-    //    for (int j = 0; j < image.rows; j++) {
-    //        nb.push_back(false);
-    //    }
-    //    istaken.push_back(nb);
-    //}
     
-    /* Go through all the pixels. */
-    for (int i = 0; i < image.cols; i++) {
-        for (int j = 0; j < image.rows; j++) {
+    for (int mx = 0; mx < image.cols; mx++) {
+        for (int my = 0; my < image.rows; my++) {
             int nr_p = 0;
             
             /* Compare the pixel to its 8 neighbours. */
             for (int k = 0; k < 8; k++) {
-                int x = i + dx8[k], y = j + dy8[k];
+                int x = mx + dx8[k], y = my + dy8[k];
                 
                 if (x >= 0 && x < image.cols && y >= 0 && y < image.rows) {
-                    if (istaken(y, x) == 0 && clusters(j, i) != clusters(y, x)) {
+                    if (istaken(y, x) == 0 && clusters(my, mx) != clusters(y, x)) {
                         nr_p += 1;
                     }
                 }
             }
             
-            /* Add the pixel to the contour list if desired. */
+            // Add the pixel to the contour list if desired.
             if (nr_p >= 2) {
-                contours.push_back(cv::Point(i,j));
-                istaken(j, i) = 255;
+                contours.push_back(cv::Point(mx,my));
+                istaken(my, mx) = 255;
             }
         }
     }
 
-	/* Draw the contour pixels. */
-    for (int i = 0; i < (int)contours.size(); i++) {
+	// Draw contour pixels
+    for (size_t i = 0; i < contours.size(); ++i) {
 		image(contours[i].y, contours[i].x) = colour;
     }
 }
 
-/*
- * Give the pixels of each cluster the same colour values. The specified colour
- * is the mean RGB colour per cluster.
- *
- * Input : The target image (IplImage*).
- * Output: -
- */
+
+// Give the pixels of each cluster the same colour values. The specified colour is the mean RGB colour per cluster.
 void Slic::colour_with_cluster_means(cv::Mat3d& image)
 {
 	std::vector<cv::Vec3d> colours(centers.size());
     
-    /* Gather the colour values per cluster. */
+    // Gather the colour values per cluster.
     for (int x = 0; x < image.cols; ++x) {
         for (int y = 0; y < image.rows; ++y) {
             const int index = clusters(y, x);
@@ -291,14 +266,12 @@ void Slic::colour_with_cluster_means(cv::Mat3d& image)
         }
     }
     
-    /* Divide by the number of pixels per cluster to get the mean colour. */
+    // Divide by the number of pixels per cluster to get the mean colour.
     for (size_t i = 0; i < colours.size(); ++i) {
-        colours[i][0] /= center_counts[i];
-        colours[i][1] /= center_counts[i];
-        colours[i][2] /= center_counts[i];
+        colours[i] /= center_counts[i];
     }
     
-    /* Fill in. */
+    // Fill
     for (int x = 0; x < image.cols; x++) {
         for (int y = 0; y < image.rows; y++) {
 			image(y, x) = colours[clusters(y, x)];
