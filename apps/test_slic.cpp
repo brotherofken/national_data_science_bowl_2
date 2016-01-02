@@ -9,12 +9,20 @@
  */
  
 #include <opencv2/opencv.hpp>
+
 #include <math.h>
 #include <vector>
 
 #include <slic/slic.h>
 
 int main(int argc, char *argv[]) {
+
+#if 1
+	cv::Mat1b image_uc = cv::imread(argv[1], cv::IMREAD_GRAYSCALE);
+
+	cv::seeds
+
+#endif 
     // Load the image and convert to Lab color space
     cv::Mat3b image_uc = cv::imread(argv[1], cv::IMREAD_COLOR);
 	cv::resize(image_uc, image_uc, cv::Size(), 2.0, 2.0);

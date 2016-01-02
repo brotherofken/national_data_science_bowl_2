@@ -1,5 +1,7 @@
 #include "slic.h"
 
+#include <array>
+
 #include <opencv2/opencv.hpp>
 
 void Slic::init_data(cv::Mat3d& image)
@@ -216,29 +218,30 @@ void Slic::display_center_grid(cv::Mat3d& image, CvScalar colour) {
 
 // Display a single pixel wide contour around the clusters.
 void Slic::display_contours(cv::Mat3d& image, cv::Vec3d colour, const double scale /*= 1.0*/) {
-    const int dx8[8] = {-1, -1,  0,  1, 1, 1, 0, -1};
-	const int dy8[8] = { 0, -1, -1, -1, 0, 1, 1,  1};
+    const std::array<int, 8> dx8 = {-1, -1,  0,  1, 1, 1, 0, -1};
+	const std::array<int, 8> dy8 = { 0, -1, -1, -1, 0, 1, 1,  1};
 	
 	// Initialize the contour vector and the matrix detailing whether a pixel is already taken to be a contour
 	std::vector<cv::Point> contours;
 	cv::Mat1b istaken(image.size(), 0);
     
-    for (int mx = 0; mx < image.cols; mx++) {
-        for (int my = 0; my < image.rows; my++) {
+    for (int mx = 0; mx < image.cols; ++mx) {
+        for (int my = 0; my < image.rows; ++my) {
             int nr_p = 0;
             
-            /* Compare the pixel to its 8 neighbours. */
+            // Compare the pixel to its 8 neighbors
             for (int k = 0; k < 8; k++) {
-                int x = mx + dx8[k], y = my + dy8[k];
+				const int x = mx + dx8[k];
+				const int y = my + dy8[k];
                 
                 if (x >= 0 && x < image.cols && y >= 0 && y < image.rows) {
-                    if (istaken(y, x) == 0 && clusters(my, mx) != clusters(y, x)) {
+					if (clusters(my, mx) != clusters(y, x) && 0 == istaken(y, x)) {
                         nr_p += 1;
                     }
                 }
             }
             
-            // Add the pixel to the contour list if desired.
+            // Add the pixel to the contour list if desired
             if (nr_p >= 2) {
                 contours.push_back(cv::Point(mx,my));
                 istaken(my, mx) = 255;
