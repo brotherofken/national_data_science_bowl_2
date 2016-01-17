@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 2.8.11)
 # SLIC test
 add_executable(test_slic test_slic.cpp )
 include_directories(${OpenCV_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/libs)
-target_link_libraries(test_slic libslic ${OpenCV_LIBS})
+target_link_libraries(test_slic libslic liblocal_opencv ${OpenCV_LIBS})
 
 install(TARGETS test_slic 
         RUNTIME DESTINATION bin)

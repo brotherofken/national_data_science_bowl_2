@@ -63,6 +63,7 @@ find_package(GDCM REQUIRED)
 add_subdirectory(apps)
 add_subdirectory(libs/slic)
 add_subdirectory(libs/mrf)
+add_subdirectory(libs/opencv)
 
 macro(set_directory ttarget tdir)
 set_property(TARGET ${ttarget} PROPERTY FOLDER ${tdir})

@@ -14,14 +14,32 @@
 #include <vector>
 
 #include <slic/slic.h>
+#include <opencv/seeds.hpp>
+#include <opencv/slic.hpp>
 
 int main(int argc, char *argv[]) {
 
-#if 1
-	cv::Mat1b image_uc = cv::imread(argv[1], cv::IMREAD_GRAYSCALE);
+#if 0
+	// Fast check of SLIC and SEEDS from opencv.
+	cv::Mat1b image_ss = cv::imread(argv[1], cv::IMREAD_GRAYSCALE);
+	cv::resize(image_ss, image_ss, cv::Size(), 2.0, 2.0, CV_INTER_CUBIC);
 
-	cv::seeds
+	//cv::Ptr<cv::ximgproc::SuperpixelSEEDS> seeds = cv::ximgproc::createSuperpixelSEEDS(image_ss.cols, image_ss.rows, image_ss.channels(), 400, 10);
+	//seeds->iterate(image_ss);
+	cv::Ptr<cv::ximgproc::SuperpixelSLIC> seeds = cv::ximgproc::createSuperpixelSLIC(image_ss, cv::ximgproc::SLIC, 20, 10);// image_ss.cols, image_ss.rows, image_ss.channels(), 400, 10);
+	seeds->iterate();
 
+	cv::Mat labels;
+	seeds->getLabels(labels);
+
+	cv::Mat mask;
+	seeds->getLabelContourMask(mask, false);
+	mask = mask | image_ss;
+	cv::imshow("result", mask);
+	cv::imwrite("1_segm_ocv.png", mask);
+
+	cv::waitKey(0);
+	return 0;
 #endif 
     // Load the image and convert to Lab color space
     cv::Mat3b image_uc = cv::imread(argv[1], cv::IMREAD_COLOR);
