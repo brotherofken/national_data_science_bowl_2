@@ -4,6 +4,21 @@
 
 #include <opencv2/opencv.hpp>
 
+#if 0
+// Intersection of 3 planes, Graphics Gems 1 pg 305
+static Vector3f getIntersection(const Plane& plane1, const Plane& plane2, const Plane& plane3)
+{
+	float det = Matrix3f::det(plane1.normal, plane2.normal, plane3.normal);
+
+	// If the determinant is 0, that means parallel planes, no intn.
+	if (det == 0.f) return 0; //could return inf or whatever
+
+	return (plane2.normal.cross(plane3.normal)*-plane1.d +
+		plane3.normal.cross(plane1.normal)*-plane2.d +
+		plane1.normal.cross(plane2.normal)*-plane3.d) / det;
+}
+#endif
+
 void Slic::init_data(cv::Mat3d& image)
 {
 	// Initialize the cluster and distance matrices.
@@ -78,7 +93,7 @@ void Slic::generate_superpixels(cv::Mat3d& image, const int superpixel_num, cons
     // Run EM iterations
     for (int iter = 0; iter < NR_ITERATIONS; iter++) {
 
-#if 1
+#if defined(_DEBUG)
 		// Visualization
 		{
 			cv::Mat1d gray;

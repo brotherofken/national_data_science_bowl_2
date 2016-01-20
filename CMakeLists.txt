@@ -53,7 +53,7 @@ endmacro()
 configure_msvc_runtime()
 
 find_package(OpenCV REQUIRED)
-find_package(Boost REQUIRED)
+#find_package(Boost REQUIRED)
 
 set(GDCM_USE_FILE "${PROJECT_SOURCE_DIR}/libs/gdcm/lib/gdcm-2.6")
 set(GDCM_DIR "${PROJECT_SOURCE_DIR}/libs/gdcm/lib/gdcm-2.6")

@@ -17,6 +17,35 @@
 #include <opencv/seeds.hpp>
 #include <opencv/slic.hpp>
 
+#include <gdcmImageReader.h>
+
+cv::Mat1d read_dcm(const std::string& filename)
+{
+	// Read DCM
+	gdcm::ImageReader ir;
+	ir.SetFileName(filename.c_str());
+	if (!ir.Read()) {
+		return cv::Mat1d();
+	}
+
+	std::cout << "Getting image from ImageReader..." << std::endl;
+
+	const gdcm::Image &gimage = ir.GetImage();
+
+	std::vector<short> vbuffer(gimage.GetBufferLength());
+	gimage.GetBuffer((char*)&vbuffer[0]);
+
+	//const unsigned int* const dimension = gimage.GetDimensions();
+	const unsigned int size_x = gimage.GetDimensions()[0];
+	const unsigned int size_y = gimage.GetDimensions()[1];
+
+	cv::Mat1d image(size_y, size_x);
+
+	std::copy(vbuffer.begin(), vbuffer.end(), image.begin());
+	return image;
+}
+
+
 int main(int argc, char *argv[]) {
 
 #if 0
@@ -42,7 +71,11 @@ int main(int argc, char *argv[]) {
 	return 0;
 #endif 
     // Load the image and convert to Lab color space
-    cv::Mat3b image_uc = cv::imread(argv[1], cv::IMREAD_COLOR);
+	cv::Mat1b image_dcm = read_dcm(argv[1]);
+	
+	cv::Mat3b image_uc;// cv::imread(argv[1], cv::IMREAD_COLOR);
+	cv::cvtColor(image_dcm, image_uc, CV_GRAY2BGR);
+
 	cv::resize(image_uc, image_uc, cv::Size(), 2.0, 2.0);
 	cv::Mat3b lab_image_uc;
 	cv::cvtColor(image_uc, lab_image_uc, cv::COLOR_BGR2Lab);
@@ -58,9 +91,17 @@ int main(int argc, char *argv[]) {
     Slic slic;
     slic.generate_superpixels(lab_image, superpixel_num, nc);
     slic.create_connectivity(lab_image);
-    
+
+	std::string outfile = argv[4];
+	outfile.erase(outfile.find(".png"));
+	outfile += "-input.png";
+
+	std::cout << outfile << std::endl;;
+
+	cv::imwrite(outfile, 255 * image);
+	slic.display_contours(image, cv::Vec3d(0, 0, 255), 3.0);
+#if defined(_DEBUG)    
     // Display the contours and show the result.
-    slic.display_contours(image, cv::Vec3d(0,0,255), 3.0);
 	cv::imshow("result", image);
 
 	// Display clusters
@@ -69,8 +110,9 @@ int main(int argc, char *argv[]) {
 	cv::Mat3b image_clst_uc;
 	image_clst.convertTo(image_clst_uc, CV_8UC3);
 	cv::cvtColor(image_clst_uc, image_clst_uc, cv::COLOR_Lab2BGR);
-	cv::imshow("result_clustered", image_clst_uc);
 
+	cv::imshow("result_clustered", image_clst_uc);
     cv::waitKey(0);
-    cv::imwrite(argv[4], 255*image);
+#endif
+	cv::imwrite(argv[4], 255 * image);
 }
