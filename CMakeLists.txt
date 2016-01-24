@@ -64,6 +64,7 @@ add_subdirectory(apps)
 add_subdirectory(libs/slic)
 add_subdirectory(libs/mrf)
 add_subdirectory(libs/opencv)
+add_subdirectory(chan_vese_segmentation)
 
 macro(set_directory ttarget tdir)
 set_property(TARGET ${ttarget} PROPERTY FOLDER ${tdir})
