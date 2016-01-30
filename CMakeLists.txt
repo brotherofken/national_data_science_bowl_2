@@ -68,6 +68,13 @@ add_executable(chan_vese
 	./src/InteractiveDataRect.cpp
 	./src/ParallelPixelFunction.cpp
 	./src/VideoWriterManager.cpp
+	./include/ChanVeseCommon.hpp
+	./include/FontParameters.hpp
+	./include/InteractiveData.hpp
+	./include/InteractiveDataCirc.hpp
+	./include/InteractiveDataRect.hpp
+	./include/ParallelPixelFunction.hpp
+	./include/VideoWriterManager.hpp
 	)
 	
 message(STATUS >> ${Boost_LIBRARIES} ${Boost_LIBRARY_DIR})

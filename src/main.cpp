@@ -356,7 +356,7 @@ separate(const cv::Mat & img,
          int w,
          bool invert = false)
 {
-  cv::Mat selection(h, w, CV_8UC3);
+  cv::Mat selection(h, w, img.type());
   cv::Mat mask(h, w, CV_8U);
   cv::Mat u_cp(h, w, CV_32F); // for some reason cv::threshold() works only with 32-bit floats
 
@@ -365,7 +365,7 @@ separate(const cv::Mat & img,
   mask.convertTo(mask, CV_8U);
   if(invert) mask = 1 - mask;
 
-  selection.setTo(cv::Scalar(255, 255, 255));
+  selection = cv::Mat::zeros(h, w, img.type());// cv::Scalar(255, 255, 255));
   img.copyTo(selection, mask);
   return selection;
 }
@@ -841,15 +841,15 @@ main(int argc,
 
 //-- Read the image (grayscale or BGR? RGB? BGR? help)
   cv::Mat _img;
-  if(grayscale) _img = cv::imread(input_filename, CV_LOAD_IMAGE_GRAYSCALE);
-  else          _img = cv::imread(input_filename, CV_LOAD_IMAGE_COLOR);
+  if(grayscale) _img = cv::imread(input_filename, cv::IMREAD_GRAYSCALE);
+  else          _img = cv::imread(input_filename, cv::IMREAD_COLOR);
   if(! _img.data)
     msg_exit("Error on opening \"" + input_filename + "\" (probably not an image)!");
 
 //-- Second conversion needed since we want to display a colored contour on a grayscale image
-  cv::Mat img;
-  if(grayscale) cv::cvtColor(_img, img, CV_GRAY2RGB);
-  else          img = _img;
+  cv::Mat img = _img.clone();
+  //if(grayscale) cv::cvtColor(_img, img, CV_GRAY2RGB);
+  //else          img = _img;
   _img.release();
 
 //-- Determine the constants and define functionals
@@ -888,6 +888,8 @@ main(int argc,
   else
     u = levelset_checkerboard(h, w);
 
+  std::cout << u.size() << std::endl;
+
 //-- Set up the video writer (and save the first frame)
   VideoWriterManager vwm;
   if(write_video)
@@ -910,6 +912,7 @@ main(int argc,
     channels.clear();
     cv::split(smoothed_img, channels);
     cv::imwrite(add_suffix(input_filename, "pm"), smoothed_img);
+	cv::imshow("smoothed", smoothed_img);
   }
 
 //-- Find intensity sum and derive the stopping condition
@@ -967,8 +970,11 @@ main(int argc,
   }
 
 //-- Select the region enclosed by the contour and save it to the disk
-  if(object_selection)
-    cv::imwrite(add_suffix(input_filename, "selection"), separate(img, u, h, w, invert));
-
+  if (object_selection) {
+	  cv::Mat separated = separate(img, u, h, w, invert);
+	  cv::imshow("separated", separated);
+    cv::imwrite(add_suffix(input_filename, "selection"), separated);
+  }
+  cv::waitKey();
   return EXIT_SUCCESS;
 }
