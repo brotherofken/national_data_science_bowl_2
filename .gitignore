@@ -1,0 +1,12 @@
+*.config
+*.creator
+*.creator.user
+*.files
+*.includes
+*.pyc
+obj/
+bin/
+dep/
+data/
+doc/
+!*.bib
