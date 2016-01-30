@@ -53,18 +53,21 @@ endmacro()
 configure_msvc_runtime()
 
 find_package(OpenCV REQUIRED)
-#find_package(Boost REQUIRED)
+
+set(Boost_USE_STATIC_LIBS        ON)
+set(Boost_USE_STATIC_RUNTIME     ON)
+find_package(Boost REQUIRED filesystem program_options system)
 
 set(GDCM_USE_FILE "${PROJECT_SOURCE_DIR}/libs/gdcm/lib/gdcm-2.6")
 set(GDCM_DIR "${PROJECT_SOURCE_DIR}/libs/gdcm/lib/gdcm-2.6")
-
 find_package(GDCM REQUIRED)
 
 add_subdirectory(apps)
 add_subdirectory(libs/slic)
 add_subdirectory(libs/mrf)
 add_subdirectory(libs/opencv)
-add_subdirectory(chan_vese_segmentation)
+add_subdirectory(libs/chan_vese)
+#add_subdirectory(chan_vese_segmentation)
 
 macro(set_directory ttarget tdir)
 set_property(TARGET ${ttarget} PROPERTY FOLDER ${tdir})
@@ -72,7 +75,7 @@ endmacro()
 
 macro(link_gdcm)
 	set(GDCM_STANDALONE ON)
-	add_subdirectory(libs/gdcm-2.6.2)
+	#add_subdirectory(libs/gdcm-2.6.2)
 	set_directory(gdcmcharls "GDCM")
 	set_directory(gdcmopenjpeg "GDCM")
 	set_directory(gdcmzlib "GDCM")
@@ -89,7 +92,7 @@ macro(link_gdcm)
 	set_directory(gdcmjpeg12 "GDCM")
 	set_directory(gdcmjpeg16 "GDCM")
 endmacro()
-#link_gdcm()
+link_gdcm()
 
 add_dependencies(test_slic libslic)
 add_dependencies(test_mrf libmrf)

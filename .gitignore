@@ -10,3 +10,5 @@ dep/
 data/
 doc/
 !*.bib
+build/
+papers/

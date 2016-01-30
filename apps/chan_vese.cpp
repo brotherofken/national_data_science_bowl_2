@@ -43,11 +43,11 @@
 #include <sys/ioctl.h> // struct winsize, ioctl(), TIOCGWINSZ
 #endif
 
-#include "ChanVeseCommon.hpp"        // ChanVese::
-#include "InteractiveDataCirc.hpp"   // InteractiveDataCirc
-#include "InteractiveDataRect.hpp"   // InteractiveDataRect
-#include "VideoWriterManager.hpp"    // VideoWriterManager
-#include "ParallelPixelFunction.hpp" // ParallelPixelFunction
+#include "chan_vese/ChanVeseCommon.hpp"        // ChanVese::
+#include "chan_vese/InteractiveDataCirc.hpp"   // InteractiveDataCirc
+#include "chan_vese/InteractiveDataRect.hpp"   // InteractiveDataRect
+#include "chan_vese/VideoWriterManager.hpp"    // VideoWriterManager
+#include "chan_vese/ParallelPixelFunction.hpp" // ParallelPixelFunction
 
                                      // Everything above comes with cv::
 
