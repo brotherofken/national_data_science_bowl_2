@@ -50,15 +50,6 @@ struct Slice
 
 Slice read_dcm(const std::string& filename)
 {
-	//gdcm::Reader reader;
-	//reader.SetFileName(filename.c_str());
-	//if (!reader.Read()) {
-	//	return Slice();
-	//}
-	//const gdcm::File &file = reader.GetFile();
-	//const gdcm::DataSet &ds = file.GetDataSet();
-	//std::cout << ds.GetDataElement(gdcm::PrivateTag(gdcm::Tag(0x0020, 0x1041))) << std::endl;
-
 	// Read Imageimage_position
 	gdcm::ImageReader ir;
 	ir.SetFileName(filename.c_str());
@@ -72,7 +63,6 @@ Slice read_dcm(const std::string& filename)
 	std::vector<short> vbuffer(gimage.GetBufferLength());
 	gimage.GetBuffer((char*)&vbuffer[0]);
 
-	//const unsigned int* const dimension = gimage.GetDimensions();
 	const unsigned int size_x = gimage.GetDimensions()[0];
 	const unsigned int size_y = gimage.GetDimensions()[1];
 	cv::Mat1d image(size_y, size_x);
