@@ -18,8 +18,7 @@ InteractiveDataRect::is_ok() const
 }
 
 cv::Mat
-InteractiveDataRect::get_levelset(int h,
-                                  int w) const
+InteractiveDataRect::get_levelset(int h, int w) const
 {
   cv::Mat u = cv::Mat::zeros(h, w, CV_64FC1);
   u(roi) = 1;
