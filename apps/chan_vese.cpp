@@ -663,14 +663,39 @@ int main(int argc, char ** argv)
 	cv::Mat1d img = read_dcm(input_filename);
 	if (!img.data)
 		msg_exit("Error on opening \"" + input_filename + "\" (probably not an image)!");
-	
+
 	//-- Determine the constants and define functionals
 	max_steps = max_steps < 0 ? std::numeric_limits<int>::max() : max_steps;
+	double max_size(std::max(img.cols, img.rows));
+	double pixel_scale = 1.0;
+	if (max_size > 256) {
+		pixel_scale = 256. / max_size;
+		cv::resize(img, img, cv::Size(), pixel_scale, pixel_scale, cv::INTER_CUBIC);
+		max_size = std::max(img.cols, img.rows);
+	}
 	const int h = img.rows;
 	const int w = img.cols;
 
 	const auto heaviside = std::bind(regularized_heaviside, std::placeholders::_1, eps);
 	const auto delta = std::bind(regularized_delta, std::placeholders::_1, eps);
+
+	cv::Point seed(point[0] * pixel_scale, point[1] * pixel_scale);
+	if (true) {
+		cv::Mat1d gb_img, gb_img_draw;
+		cv::GaussianBlur(img, gb_img, cv::Size(0.03*max_size, 0.03*max_size), 0, 0);
+		gb_img_draw = gb_img.clone();
+		cv::Point2d cur_pose(seed), prev_pose(0, 0);
+		while (cv::norm(cur_pose - prev_pose) > 1) {
+			cv::circle(gb_img_draw, cur_pose, 1, cv::Scalar(0., 0., 255.), -1);
+			prev_pose = cur_pose;
+			const size_t sz = (8. / 256.) * max_size;
+			cv::Rect roi(cur_pose - cv::Point2d(sz, sz), cv::Size(2 * sz, 2 * sz));
+			cv::Moments moments = cv::moments(gb_img(roi));
+			cv::Point2d diff(moments.m10 / moments.m00, moments.m01 / moments.m00);
+			cur_pose = cur_pose + diff - cv::Point2d(sz, sz);
+		}
+		seed = cur_pose;
+	}
 
 	//-- Construct the level set
 	cv::Mat1d u;
@@ -700,7 +725,6 @@ int main(int argc, char ** argv)
 		}
 	}
 	else if (point.size() >= 2) {
-		cv::Point seed(point[0], point[1]);
 		u = cv::Mat1d::zeros(h, w);
 		cv::circle(u, seed, 5, cv::Scalar::all(1), 1);
 	}
@@ -711,7 +735,11 @@ int main(int argc, char ** argv)
 	//-- Smooth the image with Perona-Malik
 	cv::Mat smoothed_img;
 	if (segment) {
-		smoothed_img = perona_malik(img, h, w, K, L, T);
+		cv::Mat1d abs_img;
+
+		abs_img = cv::abs(img - cv::mean(img(cv::Rect(seed - cv::Point(2, 2), cv::Size(5, 5))))[0]);
+
+		smoothed_img = perona_malik(abs_img, h, w, K, L, T);
 
 		double min, max;
 		cv::minMaxLoc(smoothed_img, &min, &max);
@@ -772,36 +800,41 @@ int main(int argc, char ** argv)
 		cv::imwrite(add_suffix(input_filename, "selection") + ".png", separated);
 	}
 
-	
 
 	cv::Mat3d imgc;
 	cv::merge(std::vector<cv::Mat1d>{ img, img, img }, imgc);
-	cv::Point seed(point[0], point[1]);
-	if (true) {
-		cv::Mat1d gb_img, gb_img_draw;
-		cv::GaussianBlur(smoothed_img, gb_img, cv::Size(7, 7), 0, 0);
-		gb_img_draw = gb_img.clone();
-		cv::Point2d cur_pose(seed), prev_pose(0, 0);
-		while (cv::norm(cur_pose - prev_pose) > 1) {
-			cv::circle(gb_img_draw, cur_pose, 1, cv::Scalar(0., 0., 255.), -1);
-			prev_pose = cur_pose;
-			const size_t sz = 8;
-			cv::Rect roi(cur_pose - cv::Point2d(sz, sz), cv::Size(2 * sz, 2 * sz));
-			cv::Moments moments = cv::moments(gb_img(roi));
-			cv::Point2d diff(moments.m10 / moments.m00, moments.m01 / moments.m00);
-			cur_pose = cur_pose + diff - cv::Point2d(sz, sz);
-		}
-		seed = cur_pose;
-	}
+
 	std::vector<std::vector<cv::Point> > contours;
 	cv::Mat1b separated8uc;
 	separated.convertTo(separated8uc, CV_8UC1, 255);
 	separated8uc = separated8uc != 0;
 	findContours(separated8uc, contours, {}, CV_RETR_LIST, CV_CHAIN_APPROX_NONE);
-	const size_t target_idx = std::distance(contours.begin(), std::find_if(contours.begin(), contours.end(), [&](std::vector<cv::Point>& contour) { return 0 < cv::pointPolygonTest(contour, seed, false); }));
-	cv::drawContours(imgc, contours, -1/*target_idx*/, cv::Scalar(0, 255, 0));
+	//size_t target_idx = std::distance(contours.begin(), std::find_if(contours.begin(), contours.end(), [&](std::vector<cv::Point>& contour) { return 0 < cv::pointPolygonTest(contour, seed, false); }));
 
+	const auto rectify_lv_segment = [] (cv::Mat1d img, cv::Point seed, std::vector<std::vector<cv::Point> > contours) {
+		cv::Mat1b watershed_contours(img.size(), 0);
+		cv::drawContours(watershed_contours, contours, -1, cv::Scalar(255, 255, 255), -1);
 
+		cv::Mat1b eroded_contours;
+		cv::erode(watershed_contours, eroded_contours, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(10, 10)));
+
+		cv::Mat1i markers(img.size(), 0);
+		{
+			std::vector<std::vector<cv::Point>> ws_contours;
+			cv::findContours(eroded_contours, ws_contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
+			for (size_t i = 0; i < ws_contours.size(); ++i) {
+				cv::drawContours(markers, ws_contours, static_cast<int>(i), cv::Scalar::all(static_cast<int>(i) + 1), -1);
+			}
+		}
+		cv::Mat3b watershed_contours_3b;
+		cv::merge(std::vector<cv::Mat1b>{watershed_contours, watershed_contours, watershed_contours}, watershed_contours_3b);
+		cv::watershed(watershed_contours_3b, markers);
+		return markers == markers(seed);
+	};
+	cv::Mat1b final_mask = rectify_lv_segment(img, seed, contours);
+	findContours(final_mask, contours, {}, CV_RETR_LIST, CV_CHAIN_APPROX_NONE);
+	const size_t target_idx = 0;
+	cv::drawContours(imgc, contours, target_idx, cv::Scalar(0, 255, 0));
 
 	cv::circle(imgc, seed, 2, cv::Scalar(0., 0., 255.), -1);
 	
@@ -813,15 +846,16 @@ int main(int argc, char ** argv)
 	std::ofstream output(add_suffix(input_filename, "contour") + ".csv");
 	std::transform(contours[target_idx].begin(), contours[target_idx].end(), std::ostream_iterator<std::string>(output, ","),
 	[&] (const cv::Point& p) {
-		return std::to_string(p.x) + "," + std::to_string(p.y);
+		return std::to_string(p.x / pixel_scale) + "," + std::to_string(p.y / pixel_scale);
 	});
 
 	if (show_windows) {
 		double min, max;
-		cv::minMaxLoc(smoothed_img, &min, &max);
+		cv::minMaxLoc(img, &min, &max);
 		max *= 0.5;
 		separated = (separated - min) / (max - min);
 		imgc = (imgc - min) / (max - min);
+		cv::minMaxLoc(smoothed_img, &min, &max);
 		smoothed_img = (smoothed_img - min) / (max - min);
 		cv::imshow("input", imgc);
 		cv::imshow("smoothed", smoothed_img);
