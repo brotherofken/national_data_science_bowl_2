@@ -12,7 +12,7 @@ struct OrientedObject
 	cv::Vec3d pixel_spacing;
 	cv::Mat1d rm;
 
-	inline cv::Mat1d rotation_matrix() const { return rm.reshape(1, 3); }
+	inline const cv::Mat1d& rotation_matrix() const { return rm; }
 
 	inline cv::Vec3d normal() const { return row_dc.cross(col_dc); };
 
@@ -59,13 +59,6 @@ struct Sequence : public OrientedObject
 	Slice::Vector slices;
 
 	using Vector = std::vector<Sequence>;
-
-	cv::Vec3d row_dc;
-	cv::Vec3d col_dc;
-	cv::Vec3d position;
-	double slice_location;
-	double slice_thickness;
-	cv::Mat1d rm;
 };
 
 struct PatientData
@@ -78,3 +71,25 @@ struct PatientData
 	Sequence ch4_seq;
 	Sequence::Vector sax_seqs;
 };
+
+//
+
+cv::Vec3d slices_intersection(const OrientedObject& s1, const OrientedObject& s2, const OrientedObject& s3)
+{
+	cv::Mat1d normals;
+	normals.push_back(s1.normal());
+	normals.push_back(s2.normal());
+	normals.push_back(s3.normal());
+	normals = normals.reshape(1, 3);
+
+	cv::Mat1d d = (cv::Mat1d(3, 1) <<
+		s1.normal().dot(s1.position),
+		s2.normal().dot(s2.position),
+		s3.normal().dot(s3.position)
+		);
+
+	cv::Mat1d intersection;
+	cv::solve(normals, d, intersection, cv::DECOMP_SVD);
+	return cv::Vec3d(intersection);
+}
+

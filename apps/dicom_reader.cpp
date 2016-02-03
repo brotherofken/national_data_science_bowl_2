@@ -116,6 +116,7 @@ Slice::Slice(const std::string& filename)
 	rm.push_back(row_dc * pixel_spacing[0]);
 	rm.push_back(col_dc * pixel_spacing[0]);
 	rm.push_back(normal() * pixel_spacing[0]);
+	rm = rm.reshape(1, 3);
 }
 
 Sequence::Sequence(const std::string& directory)
@@ -150,7 +151,7 @@ Sequence::Sequence(const std::string& directory)
 		position = slices[0].position;
 		slice_location = slices[0].slice_location;
 		slice_thickness = slices[0].slice_thickness;
-		rm = slices[0].rm.clone();
+		rm = slices[0].rm.reshape(1, 3).clone();
 		slice_location = slices[0].slice_location;
 		slice_thickness = slices[0].slice_thickness;
 	}

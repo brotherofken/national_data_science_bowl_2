@@ -49,8 +49,7 @@ int main(int argc, char ** argv)
 	PeronaMalikArgs pm_args;
 	struct ChanVeseArgs cv_args;
 
-	std::vector<double> point;
-	std::string input_filename;
+	std::string input_patient;
 
 	bool object_selection = false;
 	bool segment = false;
@@ -64,7 +63,7 @@ int main(int argc, char ** argv)
 		po::options_description desc("Allowed options", 120);
 		desc.add_options()
 			("help,h", "this message")
-			("input,i", po::value<std::string>(&input_filename), "input image")
+			("input,i", po::value<std::string>(&input_patient), "patient directory")
 			("mu", po::value<double>(&cv_args.mu)->default_value(0.5), "length penalty parameter (must be positive or zero)")
 			("nu", po::value<double>(&cv_args.nu)->default_value(0), "area penalty parameter")
 			("dt", po::value<double>(&cv_args.dt)->default_value(1), "timestep")
@@ -78,8 +77,7 @@ int main(int argc, char ** argv)
 			("segment-time,T", po::value<double>(&pm_args.T)->default_value(20), "number of smoothing steps in Perona-Malik")
 			("segment,S", po::bool_switch(&segment), "segment the image with Perona-Malik beforehand")
 			("select,s", po::bool_switch(&object_selection), "separate the region encolosed by the contour (adds suffix '_selection')")
-			("show", po::bool_switch(&show_windows), "")
-			("point,p", po::value<std::vector<double>>(&point)->multitoken(), "select seed point for segmentation");
+			("show", po::bool_switch(&show_windows), "");
 		po::variables_map vm;
 		po::store(po::command_line_parser(argc, argv).options(desc).run(), vm);
 		po::notify(vm);
@@ -89,7 +87,7 @@ int main(int argc, char ** argv)
 			return EXIT_SUCCESS;
 		}
 		if (!vm.count("input")) msg_exit("Error: you have to specify input file name!");
-		if (vm.count("input") && !boost::filesystem::exists(input_filename)) msg_exit("Error: file \"" + input_filename + "\" does not exists!");
+		if (vm.count("input") && !boost::filesystem::exists(input_patient)) msg_exit("Error: file \"" + input_patient + "\" does not exists!");
 		if (vm.count("dt") && cv_args.dt <= 0) msg_exit("Cannot have negative or zero timestep: " + std::to_string(cv_args.dt) + ".");
 		if (vm.count("mu") && cv_args.mu < 0) msg_exit("Length penalty parameter cannot be negative: " + std::to_string(cv_args.mu) + ".");
 		if (vm.count("lambda1") && cv_args.lambda1 < 0) msg_exit("Any value of lambda1 cannot be negative.");
@@ -103,14 +101,16 @@ int main(int argc, char ** argv)
 		msg_exit("error: " + std::string(e.what()));
 	}
 
-	PatientData patient_data("G:\\ndsb2\\data\\train\\455");
+	PatientData patient_data(input_patient);
 
-	//-- Read the image (grayscale or BGR? RGB? BGR? help)
-	Slice slice(input_filename);
-	cv::Mat1d img = slice.image;
+	cv::Vec3d point_3d = slices_intersection(patient_data.ch2_seq, patient_data.ch4_seq, patient_data.sax_seqs[0]);
+	cv::Point2d point = patient_data.sax_seqs[0].point_to_image(point_3d);
+
+	cv::Mat1d img = patient_data.sax_seqs[0].slices[0].image;
+	std::string input_filename = patient_data.sax_seqs[0].slices[0].filename;
 
 	if (!img.data)
-		msg_exit("Error on opening \"" + input_filename + "\" (probably not an image)!");
+		msg_exit("Error on opening \"" + input_patient + "\" (probably not an image)!");
 
 	//-- Determine the constants and define functionals
 	cv_args.max_steps = cv_args.max_steps < 0 ? std::numeric_limits<int>::max() : cv_args.max_steps;
@@ -124,7 +124,7 @@ int main(int argc, char ** argv)
 	const int h = img.rows;
 	const int w = img.cols;
 
-	cv::Point seed(point[0] * pixel_scale, point[1] * pixel_scale);
+	cv::Point seed(point.x * pixel_scale, point.y * pixel_scale);
 	if (true) {
 		cv::Mat1d gb_img, gb_img_draw;
 		cv::GaussianBlur(img, gb_img, cv::Size(0.03*max_size, 0.03*max_size), 0, 0);
@@ -144,10 +144,9 @@ int main(int argc, char ** argv)
 
 	//-- Construct the level set
 	cv::Mat1d cv_init;
-	if (point.size() >= 2) {
-		cv_init = cv::Mat1d::zeros(h, w);
-		cv::circle(cv_init, seed, 5, cv::Scalar::all(1), 1);
-	}
+	cv_init = cv::Mat1d::zeros(h, w);
+	cv::circle(cv_init, seed, 5, cv::Scalar::all(1), 1);
+
 
 	//-- Smooth the image with Perona-Malik
 	
