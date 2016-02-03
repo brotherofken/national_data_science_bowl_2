@@ -80,7 +80,7 @@ cv::Point Slic::find_local_minimum(cv::Mat1d& image, const cv::Point2i center, c
 // Compute the over-segmentation based on the step-size and relative weighting
 // of the pixel and colour values.
 void Slic::generate_superpixels(cv::Mat3d& image, const int superpixel_num, const int nc) {
-	this->step = std::sqrt(image.total() / double(superpixel_num));
+	this->step = int(std::sqrt(image.total() / double(superpixel_num)));
     this->nc = nc;
     this->ns = step;
     

@@ -18,7 +18,7 @@ ICMGraph::ICMGraph(int num_sites, int) :
 
 ENERGY_TYPE ICMGraph::compute_energy() {
     ENERGY_TYPE energy = 0;
-    for (std::size_t i = 0; i < sites.size(); ++i) {
+    for (int i = 0; i < sites.size(); ++i) {
         Site const & site = sites[i];
         energy += site.data_cost + smooth_cost(i, site.label);
     }
@@ -27,11 +27,11 @@ ENERGY_TYPE ICMGraph::compute_energy() {
 
 ENERGY_TYPE ICMGraph::optimize(int num_iterations) {
     for (int i = 0; i < num_iterations; ++i) {
-        for (std::size_t j = 0; j < sites.size(); ++j) {
+        for (int j = 0; j < sites.size(); ++j) {
             Site * site = &sites[j];
             /* Current cost */
             ENERGY_TYPE min_cost = std::numeric_limits<ENERGY_TYPE>::max(); //site->data_cost + smooth_cost(j, site->label);
-            for (std::size_t k = 0; k < site->labels.size(); ++k) {
+            for (int k = 0; k < site->labels.size(); ++k) {
                 ENERGY_TYPE cost = site->data_costs[k] + smooth_cost(j, site->labels[k]);
                 if (cost < min_cost) {
                     min_cost = cost;
