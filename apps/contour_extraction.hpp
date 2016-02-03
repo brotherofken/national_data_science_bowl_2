@@ -34,24 +34,6 @@
 #include <boost/math/special_functions/sign.hpp> // boost::math::sign()
 #include <boost/math/constants/constants.hpp>    // boost::math::constants::pi<>()
 
-
-const cv::Scalar ChanVese::Colors::white = CV_RGB(255, 255, 255);
-const cv::Scalar ChanVese::Colors::black = CV_RGB(0, 0, 0);
-const cv::Scalar ChanVese::Colors::red = CV_RGB(255, 0, 0);
-const cv::Scalar ChanVese::Colors::green = CV_RGB(0, 255, 0);
-const cv::Scalar ChanVese::Colors::blue = CV_RGB(0, 0, 255);
-const cv::Scalar ChanVese::Colors::magenta = CV_RGB(255, 0, 255);
-const cv::Scalar ChanVese::Colors::yellow = CV_RGB(255, 255, 0);
-const cv::Scalar ChanVese::Colors::cyan = CV_RGB(0, 255, 255);
-
-const cv::Mat ChanVese::Kernel::fwd_x = (cv::Mat_<double>(1, 3) << 0, -1, 1);
-const cv::Mat ChanVese::Kernel::fwd_y = (cv::Mat_<double>(3, 1) << 0, -1, 1);
-const cv::Mat ChanVese::Kernel::bwd_x = (cv::Mat_<double>(1, 3) << -1, 1, 0);
-const cv::Mat ChanVese::Kernel::bwd_y = (cv::Mat_<double>(3, 1) << -1, 1, 0);
-const cv::Mat ChanVese::Kernel::ctr_x = (cv::Mat_<double>(1, 3) << -0.5, 0, 0.5);
-const cv::Mat ChanVese::Kernel::ctr_y = (cv::Mat_<double>(3, 1) << -0.5, 0, 0.5);
-
-
 /**
 * @brief Regularized (smoothed) Heaviside step function
 * @f[ H_\epsilon(x)=\frac{1}{2}\Big[1+\frac{2}{\pi}\arctan\Big(\frac{x}{\epsilon}\Big)\Big] @f]
@@ -189,3 +171,4 @@ struct ChanVeseArgs
 
 cv::Mat1d segmentation_chan_vese(const cv::Mat1d& img, const cv::Mat1d& init, const ChanVeseArgs& args);
 
+cv::RotatedRect fitEllipse(const std::vector<cv::Point>& _points, const cv::Point& seed, const cv::Size& image_sz);

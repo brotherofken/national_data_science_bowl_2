@@ -15,7 +15,6 @@
 #include <boost/algorithm/string/predicate.hpp> // boost::iequals()
 #include <boost/algorithm/string/join.hpp> // boost::algorithm::join()
 
-
 #include <boost/program_options/options_description.hpp> // boost::program_options::options_description, boost::program_options::value<>
 #include <boost/program_options/variables_map.hpp> // boost::program_options::variables_map,
 												   // boost::program_options::store(),
@@ -24,18 +23,10 @@
 #include <boost/filesystem/operations.hpp>   // boost::filesystem::exists()
 #include <boost/filesystem/convenience.hpp>  // boost::filesystem::change_extension()
 
-
 #include "dicom_reader.hpp"
 #include "contour_extraction.hpp"
 
-
-/**
- * @brief Adds suffix to the file name
- * @param path   Path to the file
- * @param suffix Suffix
- * @param delim  String separating the original base name and the suffix
- * @return New file name with the suffix
- */
+/// Adds suffix to the file name
 std::string add_suffix(const std::string & path, const std::string & suffix, const std::string & delim = "_")
 {
 	namespace fs = boost::filesystem;
@@ -44,171 +35,14 @@ std::string add_suffix(const std::string & path, const std::string & suffix, con
 	return nw_p.string();
 }
 
-/**
- * @brief Displays error message surrounded by newlines and exits.
- * @param msg Message to display.
-*/
+
+/// Displays error message surrounded by newlines and exits.
 void msg_exit(const std::string & msg)
 {
 	std::cerr << "\n" << msg << "\n\n";
 	std::exit(EXIT_FAILURE);
 }
 
-
-/**
- * @brief Callback function for drawing contour on the image
- *        Calls InteractiveData virtual function mouse_on, which is implemented
- *        in its subclasses InteractiveDataRect (rectangular contour) and
- *        InteractiveDataCirc (circular contour)
- * @param event Event number
- * @param x     x-coordinate of the mouse in the window
- * @param y     y-coordinate of the mouse in the window
- * @param id    Additional data, which will be converted into InteractiveData pointer
- */
-void
-on_mouse(int event, int x, int y, int, void * id)
-{
-	InteractiveData * ptr = static_cast<InteractiveData *>(id);
-	ptr->mouse_on(event, x, y);
-}
-
-cv::RotatedRect fitEllipse(const std::vector<cv::Point>& _points, const cv::Point& seed, const cv::Size& image_sz)
-{
-	using namespace cv;
-
-	std::vector<cv::Point> close_points;
-	for (size_t i{}; i < _points.size(); ++i) {
-		if (cv::norm(seed - _points[i]) < 0.15 * double(std::max(image_sz.width, image_sz.height)))
-			close_points.push_back(_points[i]);
-	}
-
-	Mat points = cv::Mat(close_points);
-	int i, n = points.checkVector(2);
-	int depth = points.depth();
-	CV_Assert(n >= 0 && (depth == CV_32F || depth == CV_32S));
-
-	RotatedRect box;
-
-	if (n < 5)
-		CV_Error(CV_StsBadSize, "There should be at least 5 points to fit the ellipse");
-
-	// New fitellipse algorithm, contributed by Dr. Daniel Weiss
-	Point2f c(0, 0);
-	double gfp[5], rp[5], t;
-	const double min_eps = 1e-8;
-	bool is_float = depth == CV_32F;
-	const Point* ptsi = points.ptr<Point>();
-	const Point2f* ptsf = points.ptr<Point2f>();
-
-	AutoBuffer<double> _Ad(n * 5), _bd(n);
-	double *Ad = _Ad, *bd = _bd;
-
-	// first fit for parameters A - E
-	Mat A(n, 5, CV_64F, Ad);
-	Mat b(n, 1, CV_64F, bd);
-	Mat x(5, 1, CV_64F, gfp);
-
-	for (i = 0; i < n; i++) {
-		Point2f p = is_float ? ptsf[i] : Point2f((float)ptsi[i].x, (float)ptsi[i].y);
-		c += p;
-	}
-	c.x /= n;
-	c.y /= n;
-
-	for (i = 0; i < n; i++)
-	{
-		Point2f p = is_float ? ptsf[i] : Point2f((float)ptsi[i].x, (float)ptsi[i].y);
-		p -= c;
-		bd[i] = 10000.0; // 1.0?
-		Ad[i * 5] = -(double)p.x * p.x; // A - C signs inverted as proposed by APP
-		Ad[i * 5 + 1] = -(double)p.y * p.y;
-		Ad[i * 5 + 2] = -(double)p.x * p.y;
-		Ad[i * 5 + 3] = p.x;
-		Ad[i * 5 + 4] = p.y;
-	}
-
-
-	std::vector<double> distances(close_points.size());
-	cv::Mat1d W = cv::Mat1d::eye(A.rows, A.rows);
-	for (size_t i{}; i < close_points.size(); ++i) {
-		distances[i] = cv::norm(seed - close_points[i]);
-		W(i,i) = 1 / distances[i];
-	}
-	double wmin, wmax;
-	cv::minMaxLoc(W, &wmin, &wmax);
-	W *= 1 / wmax;
-
-	cv::pow(W, 2, W);
-
-	double l = 0.001;
-
-	cv::Mat1d Reg = cv::Mat1d::eye(A.cols, A.cols);
-	x = (A.t() * W * A + l * Reg).inv(DECOMP_SVD) * A.t() * W * b;
-
-	//solve(A, b, x, DECOMP_SVD);
-
-	// now use general-form parameters A - E to find the ellipse center:
-	// differentiate general form wrt x/y to get two equations for cx and cy
-	A = Mat(2, 2, CV_64F, Ad);
-	b = Mat(2, 1, CV_64F, bd);
-	x = Mat(2, 1, CV_64F, rp);
-	Ad[0] = 2 * gfp[0];
-	Ad[1] = Ad[2] = gfp[2];
-	Ad[3] = 2 * gfp[1];
-	bd[0] = gfp[3];
-	bd[1] = gfp[4];
-	//solve(A, b, x, DECOMP_SVD);
-	Reg = cv::Mat1d::eye(A.cols, A.cols);
-	x = (A.t() * A + l * Reg).inv(DECOMP_SVD) * A.t() * b;
-
-	// re-fit for parameters A - C with those center coordinates
-	A = Mat(n, 3, CV_64F, Ad);
-	b = Mat(n, 1, CV_64F, bd);
-	x = Mat(3, 1, CV_64F, gfp);
-	for (i = 0; i < n; i++)
-	{
-		Point2f p = is_float ? ptsf[i] : Point2f((float)ptsi[i].x, (float)ptsi[i].y);
-		p -= c;
-		bd[i] = 1.0;
-		Ad[i * 3] = (p.x - rp[0]) * (p.x - rp[0]);
-		Ad[i * 3 + 1] = (p.y - rp[1]) * (p.y - rp[1]);
-		Ad[i * 3 + 2] = (p.x - rp[0]) * (p.y - rp[1]);
-	}
-	//solve(A, b, x, DECOMP_SVD);
-
-	Reg = cv::Mat1d::eye(A.cols, A.cols);
-	x = (A.t() * W * A + l * Reg).inv(DECOMP_SVD) * A.t() * W * b;
-
-	// store angle and radii
-	rp[4] = -0.5 * atan2(gfp[2], gfp[1] - gfp[0]); // convert from APP angle usage
-	if (fabs(gfp[2]) > min_eps)
-		t = gfp[2] / sin(-2.0 * rp[4]);
-	else // ellipse is rotated by an integer multiple of pi/2
-		t = gfp[1] - gfp[0];
-	rp[2] = fabs(gfp[0] + gfp[1] - t);
-	if (rp[2] > min_eps)
-		rp[2] = std::sqrt(2.0 / rp[2]);
-	rp[3] = fabs(gfp[0] + gfp[1] + t);
-	if (rp[3] > min_eps)
-		rp[3] = std::sqrt(2.0 / rp[3]);
-
-	box.center.x = (float)rp[0] + c.x;
-	box.center.y = (float)rp[1] + c.y;
-	box.size.width = (float)(rp[2] * 2);
-	box.size.height = (float)(rp[3] * 2);
-	if (box.size.width > box.size.height)
-	{
-		float tmp;
-		CV_SWAP(box.size.width, box.size.height, tmp);
-		box.angle = (float)(90 + rp[4] * 180 / CV_PI);
-	}
-	if (box.angle < -180)
-		box.angle += 360;
-	if (box.angle > 360)
-		box.angle -= 360;
-
-	return box;
-}
 
 int main(int argc, char ** argv)
 {
@@ -217,14 +51,10 @@ int main(int argc, char ** argv)
 
 	std::vector<double> point;
 	std::string input_filename;
+
 	bool object_selection = false;
-	bool invert = false;
 	bool segment = false;
-	bool rectangle_contour = false;
-	bool circle_contour = false;
 	bool show_windows = false;
-	ChanVese::TextPosition pos = ChanVese::TextPosition::TopLeft;
-	cv::Scalar contour_color = ChanVese::Colors::blue;
 
 	//-- Parse command line arguments
 	//   Negative values in multitoken are not an issue, b/c it doesn't make much sense
@@ -247,12 +77,9 @@ int main(int argc, char ** argv)
 			("laplacian-coef,L", po::value<double>(&pm_args.L)->default_value(0.25), "coefficient in the gradient FD scheme of Perona-Malik (must be [0, 1/4])")
 			("segment-time,T", po::value<double>(&pm_args.T)->default_value(20), "number of smoothing steps in Perona-Malik")
 			("segment,S", po::bool_switch(&segment), "segment the image with Perona-Malik beforehand")
-			("invert-selection,I", po::bool_switch(&invert), "invert selected region (see: select)")
 			("select,s", po::bool_switch(&object_selection), "separate the region encolosed by the contour (adds suffix '_selection')")
 			("show", po::bool_switch(&show_windows), "")
-			("point,p", po::value<std::vector<double>>(&point)->multitoken(), "select seed point for segmentation")
-			("rectangle,R", po::bool_switch(&rectangle_contour), "select rectangular contour interactively")
-			("circle,C", po::bool_switch(&circle_contour), "select circular contour interactively");
+			("point,p", po::value<std::vector<double>>(&point)->multitoken(), "select seed point for segmentation");
 		po::variables_map vm;
 		po::store(po::command_line_parser(argc, argv).options(desc).run(), vm);
 		po::notify(vm);
@@ -271,14 +98,15 @@ int main(int argc, char ** argv)
 		if (vm.count("tol") && cv_args.tol < 0) msg_exit("Cannot have negative tolerance: " + std::to_string(cv_args.tol) + ".");
 		if (vm.count("laplacian-coef") && (pm_args.L > 0.25 || pm_args.L < 0)) msg_exit("The Laplacian coefficient in Perona-Malik segmentation must be between 0 and 0.25.");
 		if (vm.count("segment-time") && (pm_args.T < pm_args.L)) msg_exit("The segmentation duration must exceed the value of Laplacian coefficient, " + std::to_string(pm_args.L) + ".");
-		if (rectangle_contour && circle_contour) msg_exit("Cannot initialize with both rectangular and circular contour");
 	}
 	catch (std::exception & e) {
 		msg_exit("error: " + std::string(e.what()));
 	}
 
+	PatientData patient_data("G:\\ndsb2\\data\\train\\455");
+
 	//-- Read the image (grayscale or BGR? RGB? BGR? help)
-	Slice slice = read_dcm(input_filename);
+	Slice slice(input_filename);
 	cv::Mat1d img = slice.image;
 
 	if (!img.data)
@@ -319,57 +147,26 @@ int main(int argc, char ** argv)
 	if (point.size() >= 2) {
 		cv_init = cv::Mat1d::zeros(h, w);
 		cv::circle(cv_init, seed, 5, cv::Scalar::all(1), 1);
-	} else if (rectangle_contour || circle_contour) {
-		std::unique_ptr<InteractiveData> id;
-		cv::startWindowThread();
-		cv::namedWindow(WINDOW_TITLE, cv::WINDOW_NORMAL);
-
-		double min, max;
-		cv::minMaxLoc(img, &min, &max);
-		cv::Mat scaled_img = img / max;
-		if (rectangle_contour)
-			id = std::unique_ptr<InteractiveDataRect>(new InteractiveDataRect(&scaled_img, contour_color));
-		else if (circle_contour)
-			id = std::unique_ptr<InteractiveDataCirc>(new InteractiveDataCirc(&scaled_img, contour_color));
-
-		if (id) cv::setMouseCallback(WINDOW_TITLE, on_mouse, id.get());
-
-		cv::imshow(WINDOW_TITLE, scaled_img);
-		cv::waitKey();
-		cv::destroyWindow(WINDOW_TITLE);
-
-		if (id) {
-			if (!id->is_ok())
-				msg_exit("You must specify the contour with non-zero dimensions");
-			cv_init = id->get_levelset(h, w);
-		}
-	} else {
-		msg_exit("unknown method for initialization. Use point or rect or circle");
 	}
 
 	//-- Smooth the image with Perona-Malik
-	cv::Mat smoothed_img;
-	if (segment) {
-		cv::Mat1d abs_img;
+	
+	const cv::Mat1d abs_img = cv::abs(img - cv::mean(img(cv::Rect(seed - cv::Point(2, 2), cv::Size(5, 5))))[0]);
+	const cv::Mat smoothed_img = perona_malik(abs_img, pm_args);
 
-		abs_img = cv::abs(img - cv::mean(img(cv::Rect(seed - cv::Point(2, 2), cv::Size(5, 5))))[0]);
-
-		smoothed_img = perona_malik(abs_img, pm_args);
-
-		double min, max;
-		cv::minMaxLoc(smoothed_img, &min, &max);
-		cv::imwrite(add_suffix(input_filename, "pm") + ".png", smoothed_img);
-	}
+	double min, max;
+	cv::minMaxLoc(smoothed_img, &min, &max);
+	cv::imwrite(add_suffix(input_filename, "pm") + ".png", smoothed_img);
 
 
 	// Actual Chen-Vese segmentation
-	cv::Mat1d u = segmentation_chan_vese(segment ? smoothed_img : img, cv_init, cv_args);
+	cv::Mat1d chan_vese_image = segmentation_chan_vese(smoothed_img, cv_init, cv_args);
 
 
 	//-- Select the region enclosed by the contour and save it to the disk
-	cv::Mat separated = separate(img, u, invert);
+	cv::Mat chan_vese_segmentation = separate(img, chan_vese_image);
 	if (object_selection) {
-		cv::imwrite(add_suffix(input_filename, "selection") + ".png", separated);
+		cv::imwrite(add_suffix(input_filename, "selection") + ".png", chan_vese_segmentation);
 	}
 
 
@@ -378,7 +175,7 @@ int main(int argc, char ** argv)
 
 	std::vector<std::vector<cv::Point> > contours;
 	cv::Mat1b separated8uc;
-	separated.convertTo(separated8uc, CV_8UC1, 255);
+	chan_vese_segmentation.convertTo(separated8uc, CV_8UC1, 255);
 	separated8uc = separated8uc != 0;
 	findContours(separated8uc, contours, {}, CV_RETR_LIST, CV_CHAIN_APPROX_NONE);
 	size_t target_idx = std::distance(contours.begin(), std::find_if(contours.begin(), contours.end(), [&](std::vector<cv::Point>& contour) { return 0 < cv::pointPolygonTest(contour, seed, false); }));
@@ -441,13 +238,12 @@ int main(int argc, char ** argv)
 		double min, max;
 		cv::minMaxLoc(img, &min, &max);
 		max *= 0.5;
-		separated = (separated - min) / (max - min);
+		chan_vese_segmentation = (chan_vese_segmentation - min) / (max - min);
 		imgc = (imgc - min) / (max - min);
 		cv::minMaxLoc(smoothed_img, &min, &max);
-		smoothed_img = (smoothed_img - min) / (max - min);
 		cv::imshow("input", imgc);
-		cv::imshow("smoothed", smoothed_img);
-		cv::imshow("separated", separated);
+		cv::imshow("smoothed", (smoothed_img - min) / (max - min));
+		cv::imshow("separated", chan_vese_segmentation);
 	}
 
 	if (show_windows) cv::waitKey();

@@ -12,3 +12,6 @@ doc/
 !*.bib
 build/
 papers/
+libs/gdcm*
+
+
