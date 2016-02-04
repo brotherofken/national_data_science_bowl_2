@@ -50,9 +50,10 @@ struct Sequence : public OrientedObject
 		ch4 = 2,
 	};
 
-	Sequence() {}
+	Sequence() : empty(true) {}
 	Sequence(const std::string& directory);
 
+	bool empty;
 	Type type;
 	std::string name; // 2ch_*, 4ch_* or sax_*
 	size_t number; // Number that goes after _

@@ -65,63 +65,69 @@ Slice::Slice(const std::string& filename)
 	: filename(filename)
 	, frame_number(get_frame_number(filename))
 {
-	// Read to image
-	gdcm::ImageReader ir;
-	ir.SetFileName(filename.c_str());
-	if (!ir.Read()) {
-		std::cerr << "Could not read: " << filename << std::endl;
-		throw std::runtime_error("Shit happened");
+	{
+		// Read to image
+		gdcm::ImageReader ir;
+		ir.SetFileName(filename.c_str());
+		if (!ir.Read()) {
+			std::cerr << "Could not read: " << filename << std::endl;
+			throw std::runtime_error("Shit happened");
+		}
+
+		const gdcm::Image &gimage = ir.GetImage();
+
+		std::vector<short> vbuffer(gimage.GetBufferLength());
+		gimage.GetBuffer((char*)&vbuffer[0]);
+
+		const unsigned int size_x = gimage.GetDimensions()[0];
+		const unsigned int size_y = gimage.GetDimensions()[1];
+		image = cv::Mat1d(size_y, size_x);
+		std::copy(vbuffer.begin(), vbuffer.end(), image.begin());
+
+		// Read non-image fields
+
+		row_dc = cv::Vec3d(gimage.GetDirectionCosines());
+		col_dc = cv::Vec3d(gimage.GetDirectionCosines() + 3);
+		position = cv::Vec3d(gimage.GetOrigin());
+		pixel_spacing = cv::Vec3d(gimage.GetSpacing());
+		// Rotation matrix
+		rm = cv::Mat1d(0, 3);
+		rm.push_back(row_dc * pixel_spacing[0]);
+		rm.push_back(col_dc * pixel_spacing[1]);
+		rm.push_back(normal() * pixel_spacing[0]);
+		rm = rm.reshape(1, 3);
 	}
+	{
+		gdcm::Reader reader;
+		reader.SetFileName(filename.c_str());
+		if (!reader.Read()) {
+			std::cerr << "Could not read: " << filename << std::endl;
+			throw std::runtime_error("Crap happened");
+		}
+		gdcm::File &file = reader.GetFile();
 
-	const gdcm::Image &gimage = ir.GetImage();
+		gdcm::StringFilter sf;
+		sf.SetFile(reader.GetFile());
+		std::pair<std::string, std::string> slice_location_p = sf.ToStringPair(gdcm::Tag(0x0020, 0x1041));
+		std::pair<std::string, std::string> slice_thickness_p = sf.ToStringPair(gdcm::Tag(0x0018, 0x0050));
 
-	std::vector<short> vbuffer(gimage.GetBufferLength());
-	gimage.GetBuffer((char*)&vbuffer[0]);
-
-	const unsigned int size_x = gimage.GetDimensions()[0];
-	const unsigned int size_y = gimage.GetDimensions()[1];
-	image = cv::Mat1d(size_y, size_x);
-	std::copy(vbuffer.begin(), vbuffer.end(), image.begin());
-
-	// Read non-image fields
-
-	gdcm::Reader reader;
-	reader.SetFileName(filename.c_str());
-	if (!reader.Read()) {
-		std::cerr << "Could not read: " << filename << std::endl;
-		throw std::runtime_error("Crap happened");
-	}
-	gdcm::File &file = reader.GetFile();
-
-	gdcm::StringFilter sf;
-	sf.SetFile(reader.GetFile());
-	std::pair<std::string, std::string> slice_location_p = sf.ToStringPair(gdcm::Tag(0x0020, 0x1041));
-	std::pair<std::string, std::string> slice_thickness_p = sf.ToStringPair(gdcm::Tag(0x0018, 0x0050));
-
-#ifdef _DEBUG
-	std::cout << "File meta: " << filename << std::endl;
-	std::cout << slice_location_p.first << " " << slice_location_p.second << std::endl;
-	std::cout << slice_thickness_p.first << " " << slice_thickness_p.second << std::endl;
+#if 0 && defined(_DEBUG)
+		std::cout << "File meta: " << filename << std::endl;
+		std::cout << slice_location_p.first << " " << slice_location_p.second << std::endl;
+		std::cout << slice_thickness_p.first << " " << slice_thickness_p.second << std::endl;
 #endif
 
-	row_dc = cv::Vec3d(gimage.GetDirectionCosines());
-	col_dc = cv::Vec3d(gimage.GetDirectionCosines() + 3);
-	position = cv::Vec3d(gimage.GetOrigin());
-	pixel_spacing = cv::Vec3d(gimage.GetSpacing());
-	slice_location = std::stod(slice_location_p.second);
-	slice_thickness = std::stod(slice_thickness_p.second);
 
-	// Rotation matrix
-	rm = cv::Mat1d(0, 3);
-	rm.push_back(row_dc * pixel_spacing[0]);
-	rm.push_back(col_dc * pixel_spacing[0]);
-	rm.push_back(normal() * pixel_spacing[0]);
-	rm = rm.reshape(1, 3);
+		slice_location = std::stod(slice_location_p.second);
+		slice_thickness = std::stod(slice_thickness_p.second);
+	}
 }
 
 Sequence::Sequence(const std::string& directory)
+	: empty(false)
 {
 	name = fs::path(directory).stem().string();
+	std::clog << " sequence " << name << " : ";
 	const auto strs = string_split(name, "_");
 	assert(strs.size() == 2);
 	number = std::stoul(strs[1]);
@@ -129,7 +135,7 @@ Sequence::Sequence(const std::string& directory)
 	if (strs[0] == "2ch") { 
 		type = Type::ch2;
 	} else if (strs[0] == "4ch") {
-		type = Type::ch2;
+		type = Type::ch4;
 	} else if (strs[0] == "sax") {
 		type = Type::sax;
 	} else {
@@ -141,8 +147,10 @@ Sequence::Sequence(const std::string& directory)
 	std::vector<fs::path> dcm_files = get_all(directory, ".dcm");
 
 	for (const auto& file : dcm_files) {
-		slices.push_back((directory / file).string());
+		slices.push_back(Slice((directory / file).string()));
+		std::clog << slices.back().frame_number << " ";
 	}
+	std::clog << std::endl;
 
 	// I'm sure that all DCM in sax contain same information.
 	if (slices.size()) {
@@ -152,13 +160,12 @@ Sequence::Sequence(const std::string& directory)
 		slice_location = slices[0].slice_location;
 		slice_thickness = slices[0].slice_thickness;
 		rm = slices[0].rm.reshape(1, 3).clone();
-		slice_location = slices[0].slice_location;
-		slice_thickness = slices[0].slice_thickness;
 	}
 }
 
 PatientData::PatientData(const std::string& directory)
 {
+	std::clog << "Reading patient " << directory << std::endl;
 	number = std::stoul(fs::path(directory).stem().string());
 
 	// for *dcm read
