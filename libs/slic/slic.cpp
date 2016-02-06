@@ -146,9 +146,11 @@ void Slic::generate_superpixels(cv::Mat3d& image, const int superpixel_num, cons
 
         // Normalize the cluster
         for (size_t ci = 0; ci < centers.size(); ++ci) {
-			centers[ci].id = ci;
-			centers[ci].color /= center_counts[ci]; // TODO: division by zero?
-			centers[ci].coord /= center_counts[ci];
+			if (center_counts[ci]) {
+				centers[ci].id = ci;
+				centers[ci].color /= center_counts[ci]; // TODO: division by zero?
+				centers[ci].coord /= center_counts[ci];
+			}
         }
     }
 }

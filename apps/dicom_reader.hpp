@@ -2,6 +2,8 @@
 
 #include <opencv2/opencv.hpp>
 
+#include <functional>
+
 struct OrientedObject
 {
 	double slice_location;
@@ -16,13 +18,13 @@ struct OrientedObject
 
 	inline cv::Vec3d normal() const { return row_dc.cross(col_dc); };
 
-	cv::Point2d point_to_image(const cv::Vec3d& p)
+	cv::Point2d point_to_image(const cv::Vec3d& p) const
 	{
 		const cv::Mat1d projection = rotation_matrix().inv().t() * cv::Mat1d(p - position);
 		return{ projection(0, 0), projection(1,0) };
 	}
 
-	cv::Vec3d point_to_3d(const cv::Point2d& p)
+	cv::Vec3d point_to_3d(const cv::Point2d& p) const
 	{
 		const cv::Vec3d p3da{ p.x, p.y, 0. };
 		const cv::Mat1d projection = rotation_matrix() * cv::Mat1d(p3da) + position;
@@ -62,8 +64,21 @@ struct Sequence : public OrientedObject
 	using Vector = std::vector<Sequence>;
 };
 
+using line_eq_t = std::function<cv::Vec3d(double)>;
+
 struct PatientData
 {
+	struct Intersection {
+		line_eq_t l24;
+		line_eq_t ls2;
+		line_eq_t ls4;
+		cv::Vec3d p;
+		cv::Point2d p_sax;
+		cv::Point2d p_ch2;
+		cv::Point2d p_ch4;
+		using Vector = std::vector<Intersection>;
+	};
+
 	PatientData(const std::string& directory);
 
 	size_t number;
@@ -71,26 +86,9 @@ struct PatientData
 	Sequence ch2_seq;
 	Sequence ch4_seq;
 	Sequence::Vector sax_seqs;
+	Intersection::Vector intersections;
 };
 
-//
-
-cv::Vec3d slices_intersection(const OrientedObject& s1, const OrientedObject& s2, const OrientedObject& s3)
-{
-	cv::Mat1d normals;
-	normals.push_back(s1.normal());
-	normals.push_back(s2.normal());
-	normals.push_back(s3.normal());
-	normals = normals.reshape(1, 3);
-
-	cv::Mat1d d = (cv::Mat1d(3, 1) <<
-		s1.normal().dot(s1.position),
-		s2.normal().dot(s2.position),
-		s3.normal().dot(s3.position)
-		);
-
-	cv::Mat1d intersection;
-	cv::solve(normals, d, intersection, cv::DECOMP_SVD);
-	return cv::Vec3d(intersection);
-}
+line_eq_t slices_intersection(const OrientedObject& s1, const OrientedObject& s2);
+cv::Vec3d slices_intersection(const OrientedObject& s1, const OrientedObject& s2, const OrientedObject& s3);
 

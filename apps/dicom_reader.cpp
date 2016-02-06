@@ -178,4 +178,56 @@ PatientData::PatientData(const std::string& directory)
 		if (s.type == Sequence::Type::ch2) ch2_seq = s;
 		if (s.type == Sequence::Type::ch4) ch4_seq = s;
 	}
+
+	std::sort(sax_seqs.begin(), sax_seqs.end(), [](Sequence& a, Sequence& b) { return a.slice_location < b.slice_location; });
+
+	for (const auto& sax : sax_seqs) {
+		const cv::Vec3d point_3d = slices_intersection(sax, ch2_seq, ch4_seq);
+		intersections.push_back({
+			slices_intersection(ch2_seq, ch4_seq),
+			slices_intersection(sax, ch2_seq),
+			slices_intersection(sax, ch4_seq),
+			point_3d,
+			sax.point_to_image(point_3d),
+			ch2_seq.point_to_image(point_3d),
+			ch4_seq.point_to_image(point_3d)
+		});
+	}
+}
+
+line_eq_t slices_intersection(const OrientedObject& s1, const OrientedObject& s2)
+{
+	// Implementaion based on http://paulbourke.net/geometry/pointlineplane/, Section "The intersection of two planes"
+	const cv::Vec3d N1 = s1.normal();
+	const cv::Vec3d N2 = s2.normal();
+	const double d1 = s1.normal().dot(s1.position);
+	const double d2 = s2.normal().dot(s2.position);
+
+	const double dp1 = N1.dot(N1) * N2.dot(N2);
+	const double dp2 = std::pow(N1.dot(N2), 2);
+	const double det = dp1 - dp2;
+
+	const double c1 = (d1 * N2.dot(N2) - d2 * N1.dot(N2)) / det;
+	const double c2 = (d2 * N1.dot(N1) - d1 * N1.dot(N2)) / det;
+
+	return line_eq_t([=](double u) { return c1 * N1 + c2 * N2 + u * N1.cross(N2); });
+}
+
+cv::Vec3d slices_intersection(const OrientedObject& s1, const OrientedObject& s2, const OrientedObject& s3)
+{
+	cv::Mat1d normals;
+	normals.push_back(s1.normal());
+	normals.push_back(s2.normal());
+	normals.push_back(s3.normal());
+	normals = normals.reshape(1, 3);
+
+	cv::Mat1d d = (cv::Mat1d(3, 1) <<
+		s1.normal().dot(s1.position),
+		s2.normal().dot(s2.position),
+		s3.normal().dot(s3.position)
+		);
+
+	cv::Mat1d intersection;
+	cv::solve(normals, d, intersection, cv::DECOMP_SVD);
+	return cv::Vec3d(intersection);
 }

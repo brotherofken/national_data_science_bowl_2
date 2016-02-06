@@ -23,6 +23,7 @@
 #include <boost/filesystem/operations.hpp>   // boost::filesystem::exists()
 #include <boost/filesystem/convenience.hpp>  // boost::filesystem::change_extension()
 
+#include "slic/slic.h"
 #include "dicom_reader.hpp"
 #include "contour_extraction.hpp"
 
@@ -104,6 +105,13 @@ cv::Mat1b rectify_lv_segment(const cv::Mat1d& img, const cv::Point& seed, const 
 	return lv_mask;
 };
 
+enum Keys {
+	Down  = 's',
+	Left  = 'a',
+	Up    = 'w',
+	Right = 'd',
+};
+
 int main(int argc, char ** argv)
 {
 	PeronaMalikArgs pm_args;
@@ -164,13 +172,109 @@ int main(int argc, char ** argv)
 	PatientData patient_data(input_patient);
 
 	auto& sax = patient_data.sax_seqs[8];
+
 	cv::Vec3d point_3d = slices_intersection(patient_data.ch2_seq.slices[0], patient_data.ch4_seq.slices[0], sax.slices[0]);
 	cv::Point2d point = sax.point_to_image(point_3d);
 
 	cv::Mat1d img = sax.slices[11].image;
 	std::string input_filename = sax.slices[0].filename;
 
+	int sax_id = 0;
+	int slice_id = 0;
+	int key = 0;
+	while (key != 'q') {
+		const size_t sequence_len = patient_data.sax_seqs[sax_id].slices.size();
+		switch (key) {
+			case Down: sax_id = std::max(0, sax_id - 1); break;
+			case Up: sax_id = std::min(patient_data.sax_seqs.size() - 1, size_t(sax_id + 1)); break;
+			case Left: slice_id = (slice_id - 1) < 0 ? (sequence_len - 1) : (slice_id - 1); break;
+			case Right: slice_id = (slice_id + 1) % sequence_len; break;
+			default: break;
+		}
 
+		const Slice& cur_slice = patient_data.sax_seqs[sax_id].slices[slice_id];
+		const Slice& ch2_slice = patient_data.ch2_seq.slices[slice_id];
+		const Slice& ch4_slice = patient_data.ch4_seq.slices[slice_id];
+		const PatientData::Intersection& inter = patient_data.intersections[sax_id];
+
+		cv::Rect roi(inter.p_sax - cv::Point2d{ 50, 50 }, inter.p_sax + cv::Point2d{ 50, 50 });
+
+		cv::Mat cur_image = cur_slice.image.clone();
+		cv::Mat ch2_image = ch2_slice.image.clone();
+		cv::Mat ch4_image = ch4_slice.image.clone();
+
+		////////
+		cv::Mat image_f, image_lab;
+		cur_image(roi).convertTo(image_f, CV_32FC1);
+		cv::cvtColor(image_f, image_lab, CV_GRAY2BGR);
+		cv::cvtColor(image_lab/255., image_lab, CV_BGR2Lab);
+
+		// Get number of superpixels and threshold
+		const int superpixel_num = 121;
+		const int nc = 40;
+
+		// Apply SLIC
+		Slic slic;
+		slic.generate_superpixels(cv::Mat3d(image_lab), superpixel_num, nc);
+		slic.create_connectivity(cv::Mat3d(image_lab));
+
+		cv::Mat3d slic_result;
+		cv::merge(std::vector<cv::Mat1d>{ cur_image,cur_image,cur_image }, slic_result);
+		slic_result = slic_result(roi);
+		
+		////////
+
+		// Drawing
+		{
+			double min, max;
+			cv::minMaxLoc(cur_image, &min, &max);
+
+			slic.display_contours(slic_result, cv::Vec3d(0, 0, 0), 3.0);
+
+			const double val_sax = cv::mean(cur_image(cv::Rect(inter.p_sax - cv::Point2d{ 1,1 }, inter.p_sax + cv::Point2d{ 1,1 })))[0];
+			const double val_ch2 = cv::mean(ch2_image(cv::Rect(inter.p_ch2 - cv::Point2d{ 1,1 }, inter.p_ch2 + cv::Point2d{ 1,1 })))[0];
+			const double val_ch4 = cv::mean(ch4_image(cv::Rect(inter.p_ch4 - cv::Point2d{ 1,1 }, inter.p_ch4 + cv::Point2d{ 1,1 })))[0];
+
+			cur_image.convertTo(cur_image, CV_32FC1);
+			ch2_image.convertTo(ch2_image, CV_32FC1);
+			ch4_image.convertTo(ch4_image, CV_32FC1);
+			cv::cvtColor(cur_image, cur_image, cv::COLOR_GRAY2BGR);
+			cv::cvtColor(ch2_image, ch2_image, cv::COLOR_GRAY2BGR);
+			cv::cvtColor(ch4_image, ch4_image, cv::COLOR_GRAY2BGR);
+
+			const auto draw_line = [] (cv::Mat& image, const Slice& slice, const line_eq_t& line, cv::Scalar color) {
+				const cv::Point2d p1 = slice.point_to_image(line(-1000));
+				const cv::Point2d p2 = slice.point_to_image(line(1000));
+				cv::line(image, p1, p2, color, 1);
+			};
+
+			draw_line(ch4_image, ch4_slice, inter.l24, cv::Scalar(0, max, 0));
+			draw_line(ch2_image, ch2_slice, inter.l24, cv::Scalar(0, max, 0));
+			draw_line(ch2_image, ch2_slice, inter.ls2, cv::Scalar(max, 0, 0));
+			draw_line(cur_image, cur_slice, inter.ls2, cv::Scalar(max, 0, 0));
+			draw_line(ch4_image, ch4_slice, inter.ls4, cv::Scalar(max, 0, 0));
+			draw_line(cur_image, cur_slice, inter.ls4, cv::Scalar(max, 0, 0));
+			cv::circle(cur_image, inter.p_sax, 2, cv::Scalar(0., 0., max), -1);
+			cv::circle(ch2_image, inter.p_ch2, 2, cv::Scalar(0., 0., max), -1);
+			cv::circle(ch4_image, inter.p_ch4, 2, cv::Scalar(0., 0., max), -1);
+
+			cv::resize(cur_image, cur_image, cv::Size(0, 0), 256. / cur_image.cols, 256. / cur_image.cols, CV_INTER_LANCZOS4);
+			cv::resize(ch2_image, ch2_image, cv::Size(0, 0), 256. / ch2_image.cols, 256. / ch2_image.cols, CV_INTER_LANCZOS4);
+			cv::resize(ch4_image, ch4_image, cv::Size(0, 0), 256. / ch4_image.cols, 256. / ch4_image.cols, CV_INTER_LANCZOS4);
+			cv::resize(slic_result, slic_result, cv::Size(0, 0), 128. / slic_result.cols, 128. / slic_result.cols, CV_INTER_LANCZOS4);
+
+			cv::putText(cur_image, std::to_string(val_sax), cv::Point(10, 25), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
+			cv::putText(ch2_image, std::to_string(val_ch2), cv::Point(10, 25), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
+			cv::putText(ch4_image, std::to_string(val_ch4), cv::Point(10, 25), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
+
+			cv::imshow("cur_slice", (cur_image - min) / (max - min));
+			cv::imshow("ch2", (ch2_image - min) / (max - min));
+			cv::imshow("ch4", (ch4_image - min) / (max - min));
+			cv::imshow("slic_result", (slic_result - min) / (max - min));
+		}
+		key = cv::waitKey();
+	}
+	return 0;
 	//-- Determine the constants and define functionals
 	cv_args.max_steps = cv_args.max_steps < 0 ? std::numeric_limits<int>::max() : cv_args.max_steps;
 	double max_size(std::max(img.cols, img.rows));
