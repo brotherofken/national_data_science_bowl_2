@@ -208,20 +208,16 @@ int main(int argc, char ** argv)
 		cv::Mat ch4_image = (ch4_slice.image.clone() - min_max.first)/(min_max.second - min_max.first);
 
 		////////
-		cv::Mat image_f, image_lab;
-		cur_image(roi).convertTo(image_f, CV_32FC1);
-		cv::cvtColor(image_f, image_lab, CV_GRAY2BGR);
-		cv::cvtColor(image_lab, image_lab, CV_BGR2Lab);
 
 		// Get number of superpixels and threshold
-		const int superpixel_num = 121;
-		const int nc = 40;
+		const int superpixel_num = 144;
+		const double nc = 0.4;
 
 		Slic slic;
 		if (cur_slice.aux.count("SLIC") == 0) {
 			// Apply SLIC
-			slic.generate_superpixels(cv::Mat3d(image_lab), superpixel_num, nc);
-			slic.create_connectivity(cv::Mat3d(image_lab));
+			slic.generate_superpixels(cv::Mat1d(cur_image(roi)), superpixel_num, nc);
+			slic.create_connectivity(cv::Mat1d(cur_image(roi)));
 		}
 		cv::Mat3d slic_result;
 		cv::merge(std::vector<cv::Mat1d>{ cur_image,cur_image,cur_image }, slic_result);
@@ -236,6 +232,7 @@ int main(int argc, char ** argv)
 
 			if (cur_slice.aux.count("SLIC") == 0) {
 				slic.display_contours(slic_result, cv::Vec3d(0, 0, max), 3.0);
+				//slic.colour_with_cluster_means(slic_result);
 				cur_slice.aux["SLIC"] = slic_result;
 			} else {
 				slic_result = cur_slice.aux["SLIC"];

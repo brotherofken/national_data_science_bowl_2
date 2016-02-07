@@ -29,13 +29,8 @@
  */
 class Slic {
 	public:
-		/* 2d matrices are handled by 2d vectors. */
-		using vec2dd = std::vector<std::vector<double>>;
-		using vec2di = std::vector<std::vector<int>>;
-		using vec2db = std::vector<std::vector<bool>>;
-		
 		/* The number of iterations run by the clustering algorithm. */
-		static const unsigned int NR_ITERATIONS = 10;
+		static const unsigned int NR_ITERATIONS = 20;
 
     private:
         /* The cluster assignments and distance values for each pixel. */
@@ -45,19 +40,19 @@ class Slic {
         /* The LAB and xy values of the centers. */
 		struct center_t {
 			size_t id;
-			cv::Vec3d color;
+			double color;
 			cv::Point2i coord;
 		};
 		std::vector<center_t> centers;
         /* The number of occurrences of each center. */
         std::vector<int> center_counts;
         
-        /* The step size per cluster, and the color (nc) and distance (ns)
-         * parameters. */
-        int step, nc, ns;
+        /* The step size per cluster, and the color (nc) and distance (ns) parameters. */
+        int step, ns;
+		double nc;
         
         /* Compute the distance between a center and an individual pixel. */
-		double compute_dist(const center_t c, cv::Point pixel, cv::Vec3d colour);
+		inline double compute_dist(const center_t c, cv::Point pixel, const double& colour);
         /* Find the pixel with the lowest gradient in a 3x3 surrounding. */
 		cv::Point find_local_minimum(cv::Mat1d& image, const cv::Point2i center, const int r = 5);
         
@@ -77,7 +72,7 @@ class Slic {
 		* Input : The image (IplImage*).
 		* Output: -
 		*/
-        void init_data(cv::Mat3d& image);
+        void init_data(cv::Mat1d& image);
 
 
     public:
@@ -86,13 +81,13 @@ class Slic {
 		~Slic(){}
         
         // Generate an over-segmentation for an image.
-		void generate_superpixels(cv::Mat3d& image, const int superpixel_num, const int nc);
+		void generate_superpixels(cv::Mat1d& image, const int superpixel_num, const double nc);
         // Enforce connectivity for an image.
-		void create_connectivity(cv::Mat3d& image);
+		void create_connectivity(cv::Mat1d& image);
         
         // Draw functions.
-		void display_center_grid(cv::Mat3d& image, CvScalar colour);
-		void display_contours(cv::Mat3d& image, cv::Vec3d colour, const double scale = 1.0);
+		void display_center_grid(cv::Mat3d& image, const cv::Scalar& colour);
+		void display_contours(cv::Mat3d& image, const cv::Scalar& colour, const double scale = 1.0);
         void colour_with_cluster_means(cv::Mat3d& image);
 };
 

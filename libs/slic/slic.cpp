@@ -19,7 +19,7 @@ static Vector3f getIntersection(const Plane& plane1, const Plane& plane2, const 
 }
 #endif
 
-void Slic::init_data(cv::Mat3d& image)
+void Slic::init_data(cv::Mat1d& image)
 {
 	// Initialize the cluster and distance matrices.
 	clusters = cv::Mat1i(image.size(), -1);
@@ -28,11 +28,9 @@ void Slic::init_data(cv::Mat3d& image)
 	// Calculate gradient magnitude
 	cv::Mat1d image_grad;
 	{
-		cv::Mat1d image_gray;
-		cv::extractChannel(image, image_gray, 0);
 		cv::Mat1d image_dx, image_dy;
-		cv::Sobel(image_gray, image_dx, CV_64F, 1, 0);
-		cv::Sobel(image_gray, image_dy, CV_64F, 0, 1);
+		cv::Sobel(image, image_dx, CV_64F, 1, 0);
+		cv::Sobel(image, image_dy, CV_64F, 0, 1);
 		cv::magnitude(image_dx, image_dy, image_grad);
 	}
 	
@@ -40,13 +38,13 @@ void Slic::init_data(cv::Mat3d& image)
 	for (int i = step; i < image.cols - step / 2; i += step) {
 		for (int j = step; j < image.rows - step / 2; j += step) {
 			// Find the local minimum (gradient-wise).
-			cv::Point2i nc = find_local_minimum(image_grad, cvPoint(i, j));
-			cv::Vec3d colour = image(nc.y, nc.x);
+			const cv::Point2i nc = find_local_minimum(image_grad, cvPoint(i, j));
+			const double color = image(nc.y, nc.x);
 
 			// Append to vector of centers.
 			centers.push_back({
 				centers.size(),
-				{ colour[0], colour[1], colour[2] },
+				color,
 				{ nc.x, nc.y }
 			});
 			center_counts.push_back(0);
@@ -57,8 +55,8 @@ void Slic::init_data(cv::Mat3d& image)
 
 
 // Compute the distance between a cluster center and an individual pixel.
-double Slic::compute_dist(const center_t c, cv::Point pixel, cv::Vec3d color) {
-	const double color_dist = cv::norm(c.color - color); 
+double Slic::compute_dist(const center_t c, cv::Point pixel, const double& color) {
+	const double color_dist = c.color - color;
 	const double plane_dist = cv::norm(c.coord - pixel);
 	// TODO: formula slightly differs from paper, check later
 	return std::sqrt(std::pow(color_dist / nc, 2) + std::pow(plane_dist / ns, 2));
@@ -79,7 +77,7 @@ cv::Point Slic::find_local_minimum(cv::Mat1d& image, const cv::Point2i center, c
 
 // Compute the over-segmentation based on the step-size and relative weighting
 // of the pixel and colour values.
-void Slic::generate_superpixels(cv::Mat3d& image, const int superpixel_num, const int nc) {
+void Slic::generate_superpixels(cv::Mat1d& image, const int superpixel_num, const double nc) {
 	this->step = int(std::sqrt(image.total() / double(superpixel_num)));
     this->nc = nc;
     this->ns = step;
@@ -96,16 +94,14 @@ void Slic::generate_superpixels(cv::Mat3d& image, const int superpixel_num, cons
 #if defined(_DEBUG)
 		// Visualization
 		{
-			cv::Mat1d gray;
-			cv::extractChannel(image, gray, 0);
 			cv::Mat3d img;
-			cv::merge(std::vector<cv::Mat1d>(3, gray), img);
+			cv::merge(std::vector<cv::Mat1d>(3, image), img);
 
 			this->display_contours(img, cv::Vec3d(0, 0, 255), 3.0);
 			for (const auto& c : centers) {
 				cv::circle(img, c.coord, 1, cv::Scalar(0, 255, 0), 1);
 			}
-			cv::imshow("init", img / 255);
+			cv::imshow("init", img);
 			cv::waitKey(1);
 		}
 #endif
@@ -118,7 +114,7 @@ void Slic::generate_superpixels(cv::Mat3d& image, const int superpixel_num, cons
 			for (int x = center.coord.x - step*1.5; x < center.coord.x + step*1.5; ++x) {
 				for (int y = center.coord.y - step*1.5; y < center.coord.y + step*1.5; ++y) {
 					if (image_rect.contains(cv::Point(x, y))) {
-                        const cv::Vec3d color = image(y, x);
+                        const double color = image(y, x);
                         const double d = compute_dist(center, cv::Point(x, y), color);                        
                         // Update cluster allocation if the cluster minimizes the distance
                         if (d < distances(y, x)) {
@@ -131,7 +127,7 @@ void Slic::generate_superpixels(cv::Mat3d& image, const int superpixel_num, cons
         }
         
         // Clear the center values
-		centers = std::vector<center_t>(centers.size(), { 0, { 0, 0, 0 }, { 0, 0 } });
+		centers = std::vector<center_t>(centers.size(), { 0, 0, { 0, 0 } });
 		center_counts = std::vector<int>(centers.size(), 0);
         
         // Compute new cluster centers
@@ -163,7 +159,7 @@ void Slic::generate_superpixels(cv::Mat3d& image, const int superpixel_num, cons
  * Input : The image (IplImage*).
  * Output: -
  */
-void Slic::create_connectivity(cv::Mat3d& image) {
+void Slic::create_connectivity(cv::Mat1d& image) {
 	int label = 0;
 	int adjlabel = 0;
     const int lims = (image.cols * image.rows) / int(centers.size());
@@ -226,7 +222,7 @@ void Slic::create_connectivity(cv::Mat3d& image) {
  * Input : The image to display upon (IplImage*) and the colour (CvScalar).
  * Output: -
  */
-void Slic::display_center_grid(cv::Mat3d& image, CvScalar colour) {
+void Slic::display_center_grid(cv::Mat3d& image, const cv::Scalar& colour) {
     for (int i = 0; i < (int) centers.size(); i++) {
         cv::circle(image, cv::Point(centers[i].coord.x, centers[i].coord.y), 2, colour, 2);
     }
@@ -234,7 +230,7 @@ void Slic::display_center_grid(cv::Mat3d& image, CvScalar colour) {
 
 
 // Display a single pixel wide contour around the clusters.
-void Slic::display_contours(cv::Mat3d& image, cv::Vec3d colour, const double scale /*= 1.0*/) {
+void Slic::display_contours(cv::Mat3d& image, const cv::Scalar& colour, const double scale /*= 1.0*/) {
     const std::array<int, 8> dx8 = {-1, -1,  0,  1, 1, 1, 0, -1};
 	const std::array<int, 8> dy8 = { 0, -1, -1, -1, 0, 1, 1,  1};
 	
@@ -268,7 +264,7 @@ void Slic::display_contours(cv::Mat3d& image, cv::Vec3d colour, const double sca
 
 	// Draw contour pixels
     for (size_t i = 0; i < contours.size(); ++i) {
-		image(contours[i].y, contours[i].x) = colour;
+		image(contours[i].y, contours[i].x) = cv::Vec3d(colour[0], colour[1], colour[2]);
     }
 }
 
