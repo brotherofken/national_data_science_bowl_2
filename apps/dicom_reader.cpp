@@ -8,6 +8,9 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/filesystem.hpp>
 
+#include <numeric>
+#include <algorithm>
+
 namespace fs = ::boost::filesystem;
 
 namespace {
@@ -174,9 +177,11 @@ PatientData::PatientData(const std::string& directory)
 
 	for (const auto& dir : slice_directories) {
 		const Sequence s((sequences_location / dir).string());
-		if (s.type == Sequence::Type::sax) sax_seqs.push_back(s);
-		if (s.type == Sequence::Type::ch2) ch2_seq = s;
-		if (s.type == Sequence::Type::ch4) ch4_seq = s;
+		if (s.slices.size() && s.slices.size() <= 30) {
+			if (s.type == Sequence::Type::sax) sax_seqs.push_back(s);
+			if (s.type == Sequence::Type::ch2) ch2_seq = s;
+			if (s.type == Sequence::Type::ch4) ch4_seq = s;
+		}
 	}
 
 	std::sort(sax_seqs.begin(), sax_seqs.end(), [](Sequence& a, Sequence& b) { return a.slice_location < b.slice_location; });
@@ -193,6 +198,32 @@ PatientData::PatientData(const std::string& directory)
 			ch4_seq.point_to_image(point_3d)
 		});
 	}
+}
+
+std::pair<double, double> PatientData::get_min_max_bp_level() const
+{
+	const auto accumulate_ = [=](size_t i, double& value, std::function<double(double, double)> reduce_) {
+		for (size_t j{}; j < ch2_seq.slices.size(); ++j) {
+			value = reduce_(value, cv::mean(ch2_seq.slices[j].image(cv::Rect(intersections[i].p_ch2 - cv::Point2d{ 1,1 }, intersections[i].p_ch2 + cv::Point2d{ 1,1 })))[0]);
+		}
+		for (size_t j{}; j < ch2_seq.slices.size(); ++j) {
+			value = reduce_(value, cv::mean(ch4_seq.slices[j].image(cv::Rect(intersections[i].p_ch4 - cv::Point2d{ 1,1 }, intersections[i].p_ch4 + cv::Point2d{ 1,1 })))[0]);
+		}
+		const auto& s = sax_seqs[i];
+		for (size_t j{}; j < s.slices.size(); ++j) {
+			value = reduce_(value, cv::mean(s.slices[j].image(cv::Rect(intersections[i].p_sax - cv::Point2d{ 1,1 }, intersections[i].p_sax + cv::Point2d{ 1,1 })))[0]);
+		}
+	};
+
+	double minv = std::numeric_limits<double>::max();
+	double maxv = std::numeric_limits<double>::min();
+
+	for (size_t i{}; i < intersections.size(); ++i) {
+		accumulate_(i, minv, [](double v1, double v2) {return std::min(v1, v2); });
+		accumulate_(i, maxv, [](double v1, double v2) {return std::max(v1, v2); });
+	}
+
+	return std::pair<double, double>(minv, maxv);
 }
 
 line_eq_t slices_intersection(const OrientedObject& s1, const OrientedObject& s2)

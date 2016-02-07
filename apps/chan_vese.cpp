@@ -179,6 +179,9 @@ int main(int argc, char ** argv)
 	cv::Mat1d img = sax.slices[11].image;
 	std::string input_filename = sax.slices[0].filename;
 
+	std::pair <double, double> min_max = patient_data.get_min_max_bp_level();
+	std::cout << "min_max: " << min_max.first << " " << min_max.second << std::endl;
+
 	int sax_id = 0;
 	int slice_id = 0;
 	int key = 0;
@@ -192,32 +195,34 @@ int main(int argc, char ** argv)
 			default: break;
 		}
 
-		const Slice& cur_slice = patient_data.sax_seqs[sax_id].slices[slice_id];
-		const Slice& ch2_slice = patient_data.ch2_seq.slices[slice_id];
-		const Slice& ch4_slice = patient_data.ch4_seq.slices[slice_id];
+		Slice& cur_slice = patient_data.sax_seqs[sax_id].slices[slice_id];
+		Slice& ch2_slice = patient_data.ch2_seq.slices[slice_id];
+		Slice& ch4_slice = patient_data.ch4_seq.slices[slice_id];
 		const PatientData::Intersection& inter = patient_data.intersections[sax_id];
 
-		cv::Rect roi(inter.p_sax - cv::Point2d{ 50, 50 }, inter.p_sax + cv::Point2d{ 50, 50 });
+		double roi_sz = 0.2 * cur_slice.image.cols;
+		cv::Rect roi(inter.p_sax - cv::Point2d{ roi_sz, roi_sz }, inter.p_sax + cv::Point2d{ roi_sz, roi_sz });
 
-		cv::Mat cur_image = cur_slice.image.clone();
-		cv::Mat ch2_image = ch2_slice.image.clone();
-		cv::Mat ch4_image = ch4_slice.image.clone();
+		cv::Mat cur_image = (cur_slice.image.clone() - min_max.first)/(min_max.second - min_max.first);
+		cv::Mat ch2_image = (ch2_slice.image.clone() - min_max.first)/(min_max.second - min_max.first);
+		cv::Mat ch4_image = (ch4_slice.image.clone() - min_max.first)/(min_max.second - min_max.first);
 
 		////////
 		cv::Mat image_f, image_lab;
 		cur_image(roi).convertTo(image_f, CV_32FC1);
 		cv::cvtColor(image_f, image_lab, CV_GRAY2BGR);
-		cv::cvtColor(image_lab/255., image_lab, CV_BGR2Lab);
+		cv::cvtColor(image_lab, image_lab, CV_BGR2Lab);
 
 		// Get number of superpixels and threshold
 		const int superpixel_num = 121;
 		const int nc = 40;
 
-		// Apply SLIC
 		Slic slic;
-		slic.generate_superpixels(cv::Mat3d(image_lab), superpixel_num, nc);
-		slic.create_connectivity(cv::Mat3d(image_lab));
-
+		if (cur_slice.aux.count("SLIC") == 0) {
+			// Apply SLIC
+			slic.generate_superpixels(cv::Mat3d(image_lab), superpixel_num, nc);
+			slic.create_connectivity(cv::Mat3d(image_lab));
+		}
 		cv::Mat3d slic_result;
 		cv::merge(std::vector<cv::Mat1d>{ cur_image,cur_image,cur_image }, slic_result);
 		slic_result = slic_result(roi);
@@ -226,10 +231,15 @@ int main(int argc, char ** argv)
 
 		// Drawing
 		{
-			double min, max;
-			cv::minMaxLoc(cur_image, &min, &max);
+			double min = 0, max = 1;
+			//cv::minMaxLoc(cur_image, &min, &max);
 
-			slic.display_contours(slic_result, cv::Vec3d(0, 0, 0), 3.0);
+			if (cur_slice.aux.count("SLIC") == 0) {
+				slic.display_contours(slic_result, cv::Vec3d(0, 0, max), 3.0);
+				cur_slice.aux["SLIC"] = slic_result;
+			} else {
+				slic_result = cur_slice.aux["SLIC"];
+			}
 
 			const double val_sax = cv::mean(cur_image(cv::Rect(inter.p_sax - cv::Point2d{ 1,1 }, inter.p_sax + cv::Point2d{ 1,1 })))[0];
 			const double val_ch2 = cv::mean(ch2_image(cv::Rect(inter.p_ch2 - cv::Point2d{ 1,1 }, inter.p_ch2 + cv::Point2d{ 1,1 })))[0];
@@ -248,6 +258,9 @@ int main(int argc, char ** argv)
 				cv::line(image, p1, p2, color, 1);
 			};
 
+			//min = 250;
+			//max = 1700;
+
 			draw_line(ch4_image, ch4_slice, inter.l24, cv::Scalar(0, max, 0));
 			draw_line(ch2_image, ch2_slice, inter.l24, cv::Scalar(0, max, 0));
 			draw_line(ch2_image, ch2_slice, inter.ls2, cv::Scalar(max, 0, 0));
@@ -263,9 +276,13 @@ int main(int argc, char ** argv)
 			cv::resize(ch4_image, ch4_image, cv::Size(0, 0), 256. / ch4_image.cols, 256. / ch4_image.cols, CV_INTER_LANCZOS4);
 			cv::resize(slic_result, slic_result, cv::Size(0, 0), 128. / slic_result.cols, 128. / slic_result.cols, CV_INTER_LANCZOS4);
 
-			cv::putText(cur_image, std::to_string(val_sax), cv::Point(10, 25), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
-			cv::putText(ch2_image, std::to_string(val_ch2), cv::Point(10, 25), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
-			cv::putText(ch4_image, std::to_string(val_ch4), cv::Point(10, 25), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
+			
+			const std::string navigtaion_text = std::to_string(sax_id+1) + "/" + std::to_string(patient_data.sax_seqs.size()) + "   " + std::to_string(slice_id+1)+"/" + std::to_string(sequence_len);
+			cv::putText(cur_image, navigtaion_text, cv::Point(10, 15), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
+
+			cv::putText(cur_image, std::to_string(val_sax), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
+			cv::putText(ch2_image, std::to_string(val_ch2), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
+			cv::putText(ch4_image, std::to_string(val_ch4), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
 
 			cv::imshow("cur_slice", (cur_image - min) / (max - min));
 			cv::imshow("ch2", (ch2_image - min) / (max - min));

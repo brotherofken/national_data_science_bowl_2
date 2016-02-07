@@ -2,6 +2,7 @@
 
 #include <opencv2/opencv.hpp>
 
+#include <utility>
 #include <functional>
 
 struct OrientedObject
@@ -39,6 +40,8 @@ struct Slice : public OrientedObject
 	std::string filename; // relative path to image
 	size_t frame_number;
 	cv::Mat1d image;
+
+	std::map<std::string, cv::Mat> aux;
 
 	using Vector = std::vector<Slice>;
 };
@@ -80,6 +83,8 @@ struct PatientData
 	};
 
 	PatientData(const std::string& directory);
+
+	std::pair<double, double> get_min_max_bp_level() const;
 
 	size_t number;
 
