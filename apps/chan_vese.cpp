@@ -105,6 +105,75 @@ cv::Mat1b rectify_lv_segment(const cv::Mat1d& img, const cv::Point& seed, const 
 	return lv_mask;
 };
 
+cv::Mat1b global_mask;
+cv::Mat3b global_mask_tmp;
+cv::Mat1d global_contour;
+
+using contours_t = std::vector<std::vector<cv::Point>>;
+contours_t draw_global_mask(const double scale = 1.)
+{
+	if (global_mask.empty()) return{};
+
+	contours_t contours;
+	cv::Mat1b masc_c = global_mask.clone();
+	findContours(masc_c, contours, {}, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE);
+	contours_t hull(contours.size());
+
+	cv::Mat mask = global_mask.clone();
+	cv::merge(std::vector<cv::Mat>{mask, mask, mask}, global_mask_tmp);
+
+	for (size_t i{}; i < contours.size(); ++i) {
+		cv::convexHull(contours[i], hull[i], false, true);
+	}
+
+	if (hull.size() > 1) {
+		const auto max_hull_it = std::max_element(hull.cbegin(), hull.cend(), [](const std::vector<cv::Point>& c1, const std::vector<cv::Point>& c2) {
+			return cv::contourArea(c1) < cv::contourArea(c2);
+		});
+		const contours_t::value_type max_hull(max_hull_it->cbegin(), max_hull_it->cend());
+		hull = contours_t{ { max_hull } };
+	}
+
+	cv::drawContours(global_mask_tmp, hull, -1, cv::Scalar(0, 0, 255), 1);
+
+	cv::resize(global_mask_tmp, global_mask_tmp, cv::Size(), scale, scale);
+
+	cv::imshow("segment", global_mask_tmp);
+	return hull;
+}
+
+void on_mouse(int event, int x, int y, int, void * id)
+{
+	Slic* ptr = static_cast<Slic*>(id);
+	if (event == cv::EVENT_LBUTTONDOWN) {
+		double scale = 256. / ptr->get_clusters().cols;
+		cv::Point p(x / scale, y / scale);
+		cv::Mat mask = ptr->get_clusters() == ptr->get_clusters()(p);
+
+		if (global_mask.empty()) {
+			global_mask = mask;
+		} else {
+			global_mask ^= mask;
+		}
+
+		contours_t contour = draw_global_mask(scale);
+
+		if (contour.size() == 1) {
+			global_contour = cv::Mat1d(0, 1);
+			cv::Rect roi = ptr->get_roi();
+			global_contour.push_back(roi.x);
+			global_contour.push_back(roi.y);
+			global_contour.push_back(roi.width);
+			global_contour.push_back(roi.height);
+
+			for (auto& p : contour[0]) {
+				global_contour.push_back(p.x);
+				global_contour.push_back(p.y);
+			}
+		}
+	}
+}
+
 enum Keys {
 	Down  = 's',
 	Left  = 'a',
@@ -185,58 +254,76 @@ int main(int argc, char ** argv)
 	int sax_id = 0;
 	int slice_id = 0;
 	int key = 0;
+
+	Slic slic;
+
 	while (key != 'q') {
+		const int prev_sax_id = sax_id;
+		const int prev_slice_id = slice_id;
+		bool save_contours = false;
 		const size_t sequence_len = patient_data.sax_seqs[sax_id].slices.size();
 		switch (key) {
 			case Down: sax_id = std::max(0, sax_id - 1); break;
 			case Up: sax_id = std::min(patient_data.sax_seqs.size() - 1, size_t(sax_id + 1)); break;
 			case Left: slice_id = (slice_id - 1) < 0 ? (sequence_len - 1) : (slice_id - 1); break;
 			case Right: slice_id = (slice_id + 1) % sequence_len; break;
+			case 'c': save_contours = true;
 			default: break;
 		}
 
+
+		// Get data for current slice
 		Slice& cur_slice = patient_data.sax_seqs[sax_id].slices[slice_id];
 		Slice& ch2_slice = patient_data.ch2_seq.slices[slice_id];
 		Slice& ch4_slice = patient_data.ch4_seq.slices[slice_id];
 		const PatientData::Intersection& inter = patient_data.intersections[sax_id];
 
-		double roi_sz = 0.2 * cur_slice.image.cols;
-		cv::Rect roi(inter.p_sax - cv::Point2d{ roi_sz, roi_sz }, inter.p_sax + cv::Point2d{ roi_sz, roi_sz });
+		if (sax_id != prev_sax_id || slice_id != prev_slice_id) {
+			// save mask
+			if (!global_mask.empty()) {
+				patient_data.sax_seqs[prev_sax_id].slices[prev_slice_id].aux[PatientData::AUX_LV_MASK] = global_mask.clone();
+				patient_data.sax_seqs[prev_sax_id].slices[prev_slice_id].aux[PatientData::AUX_CONTOUR] = global_contour.clone();
+				global_mask.release();
+			}
+
+			if (cur_slice.aux.count(PatientData::AUX_LV_MASK) != 0) {
+				global_mask = cur_slice.aux[PatientData::AUX_LV_MASK].clone();
+				draw_global_mask(256. / global_mask.cols);
+			}
+		}
+
+		if (save_contours) {
+			patient_data.save_contours();
+		}
+
 
 		cv::Mat cur_image = (cur_slice.image.clone() - min_max.first)/(min_max.second - min_max.first);
 		cv::Mat ch2_image = (ch2_slice.image.clone() - min_max.first)/(min_max.second - min_max.first);
 		cv::Mat ch4_image = (ch4_slice.image.clone() - min_max.first)/(min_max.second - min_max.first);
 
-		////////
+		double roi_sz = 0.2 * cur_slice.image.cols;
+		cv::Rect roi(inter.p_sax - cv::Point2d{ roi_sz, roi_sz }, inter.p_sax + cv::Point2d{ roi_sz, roi_sz });
+		roi = roi & cv::Rect({ 0, 0 }, cur_image.size());
 
-		// Get number of superpixels and threshold
-		const int superpixel_num = 144;
-		const double nc = 0.4;
+		// SLIC
+		const int superpixel_num = 200;
+		const double nc = 0.3;
 
-		Slic slic;
-		if (cur_slice.aux.count("SLIC") == 0) {
-			// Apply SLIC
-			slic.generate_superpixels(cv::Mat1d(cur_image(roi)), superpixel_num, nc);
-			slic.create_connectivity(cv::Mat1d(cur_image(roi)));
-		}
+		// Apply SLIC
+		slic.generate_superpixels(cv::Mat1d(cur_image), superpixel_num, nc, roi);
+		slic.create_connectivity(cv::Mat1d(cur_image));
+
 		cv::Mat3d slic_result;
 		cv::merge(std::vector<cv::Mat1d>{ cur_image,cur_image,cur_image }, slic_result);
 		slic_result = slic_result(roi);
-		
-		////////
 
 		// Drawing
 		{
-			double min = 0, max = 1;
-			//cv::minMaxLoc(cur_image, &min, &max);
+			const double max = 1;
 
-			if (cur_slice.aux.count("SLIC") == 0) {
-				slic.display_contours(slic_result, cv::Vec3d(0, 0, max), 3.0);
-				//slic.colour_with_cluster_means(slic_result);
-				cur_slice.aux["SLIC"] = slic_result;
-			} else {
-				slic_result = cur_slice.aux["SLIC"];
-			}
+			slic.display_contours(slic_result, cv::Vec3d(0, 0, max), 3.0);
+			//slic.colour_with_cluster_means(slic_result);
+			cur_slice.aux["SLIC"] = slic_result;
 
 			const double val_sax = cv::mean(cur_image(cv::Rect(inter.p_sax - cv::Point2d{ 1,1 }, inter.p_sax + cv::Point2d{ 1,1 })))[0];
 			const double val_ch2 = cv::mean(ch2_image(cv::Rect(inter.p_ch2 - cv::Point2d{ 1,1 }, inter.p_ch2 + cv::Point2d{ 1,1 })))[0];
@@ -254,10 +341,7 @@ int main(int argc, char ** argv)
 				const cv::Point2d p2 = slice.point_to_image(line(1000));
 				cv::line(image, p1, p2, color, 1);
 			};
-
-			//min = 250;
-			//max = 1700;
-
+			
 			draw_line(ch4_image, ch4_slice, inter.l24, cv::Scalar(0, max, 0));
 			draw_line(ch2_image, ch2_slice, inter.l24, cv::Scalar(0, max, 0));
 			draw_line(ch2_image, ch2_slice, inter.ls2, cv::Scalar(max, 0, 0));
@@ -271,9 +355,8 @@ int main(int argc, char ** argv)
 			cv::resize(cur_image, cur_image, cv::Size(0, 0), 256. / cur_image.cols, 256. / cur_image.cols, CV_INTER_LANCZOS4);
 			cv::resize(ch2_image, ch2_image, cv::Size(0, 0), 256. / ch2_image.cols, 256. / ch2_image.cols, CV_INTER_LANCZOS4);
 			cv::resize(ch4_image, ch4_image, cv::Size(0, 0), 256. / ch4_image.cols, 256. / ch4_image.cols, CV_INTER_LANCZOS4);
-			cv::resize(slic_result, slic_result, cv::Size(0, 0), 128. / slic_result.cols, 128. / slic_result.cols, CV_INTER_LANCZOS4);
+			cv::resize(slic_result, slic_result, cv::Size(0, 0), 256. / slic_result.cols, 256. / slic_result.cols, CV_INTER_LANCZOS4);
 
-			
 			const std::string navigtaion_text = std::to_string(sax_id+1) + "/" + std::to_string(patient_data.sax_seqs.size()) + "   " + std::to_string(slice_id+1)+"/" + std::to_string(sequence_len);
 			cv::putText(cur_image, navigtaion_text, cv::Point(10, 15), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
 
@@ -281,10 +364,11 @@ int main(int argc, char ** argv)
 			cv::putText(ch2_image, std::to_string(val_ch2), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
 			cv::putText(ch4_image, std::to_string(val_ch4), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
 
-			cv::imshow("cur_slice", (cur_image - min) / (max - min));
-			cv::imshow("ch2", (ch2_image - min) / (max - min));
-			cv::imshow("ch4", (ch4_image - min) / (max - min));
-			cv::imshow("slic_result", (slic_result - min) / (max - min));
+			cv::imshow("cur_slice", cur_image);
+			cv::imshow("ch2", ch2_image);
+			cv::imshow("ch4", ch4_image);
+			cv::imshow("slic_result", slic_result);
+			cv::setMouseCallback("slic_result", on_mouse, &slic);
 		}
 		key = cv::waitKey();
 	}

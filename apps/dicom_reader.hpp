@@ -2,6 +2,7 @@
 
 #include <opencv2/opencv.hpp>
 
+#include <fstream>
 #include <utility>
 #include <functional>
 
@@ -71,6 +72,9 @@ using line_eq_t = std::function<cv::Vec3d(double)>;
 
 struct PatientData
 {
+	static const std::string AUX_LV_MASK;// = "lv_mask";
+	static const std::string AUX_CONTOUR;// = "lv_annotation";
+
 	struct Intersection {
 		line_eq_t l24;
 		line_eq_t ls2;
@@ -86,6 +90,9 @@ struct PatientData
 
 	std::pair<double, double> get_min_max_bp_level() const;
 
+	void save_contours() const;
+
+	std::string directory;
 	size_t number;
 
 	Sequence ch2_seq;

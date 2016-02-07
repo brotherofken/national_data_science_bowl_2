@@ -30,13 +30,18 @@
 class Slic {
 	public:
 		/* The number of iterations run by the clustering algorithm. */
-		static const unsigned int NR_ITERATIONS = 20;
+		static const unsigned int NR_ITERATIONS = 25;
+
+		const cv::Mat1i& get_clusters() const { return clusters; }
+		const cv::Rect& get_roi() const { return roi; }
 
     private:
         /* The cluster assignments and distance values for each pixel. */
         cv::Mat1i clusters;
         cv::Mat1d distances;
         
+		cv::Rect roi;
+
         /* The LAB and xy values of the centers. */
 		struct center_t {
 			size_t id;
@@ -81,7 +86,7 @@ class Slic {
 		~Slic(){}
         
         // Generate an over-segmentation for an image.
-		void generate_superpixels(cv::Mat1d& image, const int superpixel_num, const double nc);
+		void generate_superpixels(cv::Mat1d& image, const int superpixel_num, const double nc, cv::Rect roi = cv::Rect());
         // Enforce connectivity for an image.
 		void create_connectivity(cv::Mat1d& image);
         

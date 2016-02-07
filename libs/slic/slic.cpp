@@ -70,18 +70,23 @@ cv::Point Slic::find_local_minimum(cv::Mat1d& image, const cv::Point2i center, c
     cv::Point min_location = center;
 
 	const cv::Rect roi(center.x - r, center.y - r, 2 * r, 2 * r);
-	cv::minMaxLoc(image(roi), &min_value, nullptr, &min_location);
+	cv::Rect image_rect(cv::Point(0, 0), image.size());
+
+	cv::minMaxLoc(image(roi & image_rect), &min_value, nullptr, &min_location);
 	return min_location + roi.tl();
 }
 
 
 // Compute the over-segmentation based on the step-size and relative weighting
 // of the pixel and colour values.
-void Slic::generate_superpixels(cv::Mat1d& image, const int superpixel_num, const double nc) {
-	this->step = int(std::sqrt(image.total() / double(superpixel_num)));
+void Slic::generate_superpixels(cv::Mat1d& image_, const int superpixel_num, const double nc, cv::Rect roi_ /*= cv::Rect()*/) {
     this->nc = nc;
     this->ns = step;
-    
+	roi = roi_.area() == 0 ? cv::Rect(cv::Point(0,0), image_.size()) : roi_;
+	cv::Mat1d image = image_(roi).clone();
+	this->step = int(std::sqrt(image.total() / double(superpixel_num)));
+
+
     // Clear previous data (if any), and re-initialize it.
     clear_data();
     init_data(image);
@@ -115,7 +120,7 @@ void Slic::generate_superpixels(cv::Mat1d& image, const int superpixel_num, cons
 				for (int y = center.coord.y - step*1.5; y < center.coord.y + step*1.5; ++y) {
 					if (image_rect.contains(cv::Point(x, y))) {
                         const double color = image(y, x);
-                        const double d = compute_dist(center, cv::Point(x, y), color);                        
+                        const double d = compute_dist(center, cv::Point(x, y), color);
                         // Update cluster allocation if the cluster minimizes the distance
                         if (d < distances(y, x)) {
                             distances(y, x) = d;
@@ -159,7 +164,9 @@ void Slic::generate_superpixels(cv::Mat1d& image, const int superpixel_num, cons
  * Input : The image (IplImage*).
  * Output: -
  */
-void Slic::create_connectivity(cv::Mat1d& image) {
+void Slic::create_connectivity(cv::Mat1d& image_) {
+	cv::Mat1d image = image_(roi).clone();
+
 	int label = 0;
 	int adjlabel = 0;
     const int lims = (image.cols * image.rows) / int(centers.size());
@@ -176,7 +183,7 @@ void Slic::create_connectivity(cv::Mat1d& image) {
                 std::vector<cv::Point> elements;
                 elements.push_back(cv::Point(mx, my));
             
-                /* Find an adjacent label, for possible use later. */
+                // Find an adjacent label, for possible use later.
                 for (int k = 0; k < 4; k++) {
                     int x = elements[0].x + dx4[k], y = elements[0].y + dy4[k];
                     
@@ -202,8 +209,7 @@ void Slic::create_connectivity(cv::Mat1d& image) {
                     }
                 }
                 
-                /* Use the earlier found adjacent label if a segment size is
-                   smaller than a limit. */
+                // Use the earlier found adjacent label if a segment size is smaller than a limit.
                 if (count <= lims >> 2) {
                     for (int c = 0; c < count; c++) {
 						new_clusters(elements[c].y, elements[c].x) = adjlabel;

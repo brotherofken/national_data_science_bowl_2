@@ -11,6 +11,10 @@
 #include <numeric>
 #include <algorithm>
 
+const std::string PatientData::AUX_LV_MASK = "lv_mask";
+const std::string PatientData::AUX_CONTOUR = "lv_annotation";
+
+
 namespace fs = ::boost::filesystem;
 
 namespace {
@@ -166,8 +170,9 @@ Sequence::Sequence(const std::string& directory)
 	}
 }
 
-PatientData::PatientData(const std::string& directory)
+PatientData::PatientData(const std::string& directory_)
 {
+	directory = directory_;
 	std::clog << "Reading patient " << directory << std::endl;
 	number = std::stoul(fs::path(directory).stem().string());
 
@@ -204,14 +209,17 @@ std::pair<double, double> PatientData::get_min_max_bp_level() const
 {
 	const auto accumulate_ = [=](size_t i, double& value, std::function<double(double, double)> reduce_) {
 		for (size_t j{}; j < ch2_seq.slices.size(); ++j) {
-			value = reduce_(value, cv::mean(ch2_seq.slices[j].image(cv::Rect(intersections[i].p_ch2 - cv::Point2d{ 1,1 }, intersections[i].p_ch2 + cv::Point2d{ 1,1 })))[0]);
+			if (cv::Rect(cv::Point{ 0, 0 }, ch2_seq.slices[j].image.size()).contains(intersections[i].p_ch2))
+				value = reduce_(value, ch2_seq.slices[j].image(intersections[i].p_ch2));// cv::mean(ch2_seq.slices[j].image(cv::Rect(intersections[i].p_ch2 - cv::Point2d{ 1,1 }, intersections[i].p_ch2 + cv::Point2d{ 1,1 })))[0]);
 		}
-		for (size_t j{}; j < ch2_seq.slices.size(); ++j) {
-			value = reduce_(value, cv::mean(ch4_seq.slices[j].image(cv::Rect(intersections[i].p_ch4 - cv::Point2d{ 1,1 }, intersections[i].p_ch4 + cv::Point2d{ 1,1 })))[0]);
+		for (size_t j{}; j < ch4_seq.slices.size(); ++j) {
+			if (cv::Rect(cv::Point{ 0, 0 }, ch4_seq.slices[j].image.size()).contains(intersections[i].p_ch4))
+				value = reduce_(value, ch4_seq.slices[j].image(intersections[i].p_ch4));//cv::mean(ch4_seq.slices[j].image(cv::Rect(intersections[i].p_ch4 - cv::Point2d{ 1,1 }, intersections[i].p_ch4 + cv::Point2d{ 1,1 })))[0]);
 		}
 		const auto& s = sax_seqs[i];
 		for (size_t j{}; j < s.slices.size(); ++j) {
-			value = reduce_(value, cv::mean(s.slices[j].image(cv::Rect(intersections[i].p_sax - cv::Point2d{ 1,1 }, intersections[i].p_sax + cv::Point2d{ 1,1 })))[0]);
+			if (cv::Rect(cv::Point{ 0, 0 }, s.slices[j].image.size()).contains(intersections[i].p_sax))
+				value = reduce_(value, s.slices[j].image(intersections[i].p_sax)); // cv::mean(s.slices[j].image(cv::Rect(intersections[i].p_sax - cv::Point2d{ 1,1 }, intersections[i].p_sax + cv::Point2d{ 1,1 })))[0]);
 		}
 	};
 
@@ -223,7 +231,28 @@ std::pair<double, double> PatientData::get_min_max_bp_level() const
 		accumulate_(i, maxv, [](double v1, double v2) {return std::max(v1, v2); });
 	}
 
-	return std::pair<double, double>(minv, maxv);
+	return std::pair<double, double>(0.5 * minv, maxv * 1.5);
+}
+
+
+void PatientData::save_contours() const {
+	std::string annotation_file_name = this->directory + ".pts";
+	std::ofstream out(annotation_file_name);
+
+	std::cout << "saving contour to " + annotation_file_name << std::endl;
+	for (const Sequence& seq : sax_seqs) {
+		for (const Slice& slice : seq.slices) {
+			if (slice.aux.count(AUX_LV_MASK) != 0) {
+				std::cout << "saving contour " + slice.filename << std::endl;
+				out << slice.filename << "\t";
+				const cv::Mat contour = slice.aux.at(AUX_CONTOUR);
+				for (size_t i{}; i < contour.rows; ++i) {
+					out << contour.at<double>(i) << "\t";
+				}
+				out << std::endl;
+			}
+		}
+	}
 }
 
 line_eq_t slices_intersection(const OrientedObject& s1, const OrientedObject& s2)
