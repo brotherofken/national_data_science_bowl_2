@@ -270,7 +270,7 @@ void Slic::display_contours(cv::Mat3d& image, const cv::Scalar& colour, const do
 
 	// Draw contour pixels
     for (size_t i = 0; i < contours.size(); ++i) {
-		image(contours[i].y, contours[i].x) = cv::Vec3d(colour[0], colour[1], colour[2]);
+		image(contours[i].y, contours[i].x) += cv::Vec3d(colour[0], colour[1], colour[2]);
     }
 }
 

@@ -179,6 +179,8 @@ enum Keys {
 	Left  = 'a',
 	Up    = 'w',
 	Right = 'd',
+	DecSP = '[',
+	IncSP = ']',
 };
 
 int main(int argc, char ** argv)
@@ -254,6 +256,7 @@ int main(int argc, char ** argv)
 	int sax_id = 0;
 	int slice_id = 0;
 	int key = 0;
+	int superpixel_num = 200;
 
 	Slic slic;
 
@@ -267,6 +270,8 @@ int main(int argc, char ** argv)
 			case Up: sax_id = std::min(patient_data.sax_seqs.size() - 1, size_t(sax_id + 1)); break;
 			case Left: slice_id = (slice_id - 1) < 0 ? (sequence_len - 1) : (slice_id - 1); break;
 			case Right: slice_id = (slice_id + 1) % sequence_len; break;
+			case DecSP: superpixel_num = std::max(50, superpixel_num - 25); break;
+			case IncSP: superpixel_num = std::min(250, superpixel_num + 25); break;
 			case 'c': save_contours = true;
 			default: break;
 		}
@@ -306,8 +311,7 @@ int main(int argc, char ** argv)
 		roi = roi & cv::Rect({ 0, 0 }, cur_image.size());
 
 		// SLIC
-		const int superpixel_num = 200;
-		const double nc = 0.3;
+		const double nc = 0.2;
 
 		// Apply SLIC
 		slic.generate_superpixels(cv::Mat1d(cur_image), superpixel_num, nc, roi);
@@ -321,9 +325,9 @@ int main(int argc, char ** argv)
 		{
 			const double max = 1;
 
-			slic.display_contours(slic_result, cv::Vec3d(0, 0, max), 3.0);
+			slic.display_contours(slic_result, cv::Vec3d(0, 0, 0.5 * max), 3.0);
 			//slic.colour_with_cluster_means(slic_result);
-			cur_slice.aux["SLIC"] = slic_result;
+			cur_slice.aux["SLIC"] = slic_result.clone();
 
 			const double val_sax = cv::mean(cur_image(cv::Rect(inter.p_sax - cv::Point2d{ 1,1 }, inter.p_sax + cv::Point2d{ 1,1 })))[0];
 			const double val_ch2 = cv::mean(ch2_image(cv::Rect(inter.p_ch2 - cv::Point2d{ 1,1 }, inter.p_ch2 + cv::Point2d{ 1,1 })))[0];

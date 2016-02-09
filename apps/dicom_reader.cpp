@@ -167,6 +167,7 @@ Sequence::Sequence(const std::string& directory)
 		slice_location = slices[0].slice_location;
 		slice_thickness = slices[0].slice_thickness;
 		rm = slices[0].rm.reshape(1, 3).clone();
+		assert(rm.cols == 3 && rm.rows == 3);
 	}
 }
 
@@ -182,6 +183,8 @@ PatientData::PatientData(const std::string& directory_)
 
 	for (const auto& dir : slice_directories) {
 		const Sequence s((sequences_location / dir).string());
+		assert(s.rm.cols == 3 && s.rm.rows == 3);
+
 		if (s.slices.size() && s.slices.size() <= 30) {
 			if (s.type == Sequence::Type::sax) sax_seqs.push_back(s);
 			if (s.type == Sequence::Type::ch2) ch2_seq = s;
@@ -189,9 +192,12 @@ PatientData::PatientData(const std::string& directory_)
 		}
 	}
 
+	const bool chamber_views_ok = !ch2_seq.empty && !ch4_seq.empty;
+
 	std::sort(sax_seqs.begin(), sax_seqs.end(), [](Sequence& a, Sequence& b) { return a.slice_location < b.slice_location; });
 
-	for (const auto& sax : sax_seqs) {
+	if (chamber_views_ok)
+	for (const Sequence& sax : sax_seqs) {
 		const cv::Vec3d point_3d = slices_intersection(sax, ch2_seq, ch4_seq);
 		intersections.push_back({
 			slices_intersection(ch2_seq, ch4_seq),
