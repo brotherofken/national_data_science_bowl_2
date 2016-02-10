@@ -137,6 +137,11 @@ def contour_to_landmarks(contour):
    
     return contour[lm_16]
 
+# x y width height
+def bounding_box(iterable):
+    min_x, min_y = np.min(iterable, axis=0)
+    max_x, max_y = np.max(iterable, axis=0)
+    return np.array([min_x, min_y, max_x-min_x, max_y - min_y])
 
 #rect = contours[0][1]
 #contour = contours[0][2]
@@ -144,14 +149,17 @@ def contour_to_landmarks(contour):
 def line_to_landmark(rect, contour):
     dcontour = make_dense_contour(contour)
     landmarks = contour_to_landmarks(dcontour)
-    landmarks = np.array([[lm[0] + rect[0], lm[1] + rect[1]] for lm in landmarks]) #+ rect[0:1]
+    landmarks = np.array([[lm[0] + rect[0], lm[1] + rect[1]] for lm in landmarks])
+    bbox = bounding_box(landmarks)
     flat_landmarks = np.ravel(landmarks.reshape((1,len(landmarks)*2)))
-    return flat_landmarks 
+    result = np.hstack((bbox, flat_landmarks))
+    return result 
 
-
+if False:
+    input_file_name = '../../data/train/1.pts'
 # In[]
-input_file_name = sys.argv[1] #'../../data/train/1.pts'
-output_file_name = input_file_name[:-4] + '_16.lms'
+input_file_name = sys.argv[1] 
+output_file_name = input_file_name[:-4] + '_boxed16.lms'
 contours = read_contours(input_file_name)
 
 # In[]    
