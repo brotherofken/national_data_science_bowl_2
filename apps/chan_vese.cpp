@@ -183,6 +183,12 @@ enum Keys {
 	IncSP = ']',
 };
 
+size_t get_prev_sax_idx(const Sequence& seq, const size_t id) { return (int(id) - 1 <= 0) ? (seq.slices.size() - 1) : (id - 1); }
+size_t get_next_sax_idx(const Sequence& seq, const size_t id) { return (id + 1) >= seq.slices.size() ? 0 : id + 1; }
+Slice& get_prev_slice(Sequence& seq, const size_t id) { return seq.slices[get_prev_sax_idx(seq, id)]; }
+Slice& get_next_slice(Sequence& seq, const size_t id) { return seq.slices[get_next_sax_idx(seq, id)]; }
+
+
 int main(int argc, char ** argv)
 {
 	PeronaMalikArgs pm_args;
@@ -302,9 +308,9 @@ int main(int argc, char ** argv)
 		}
 
 
-		cv::Mat cur_image = (cur_slice.image.clone() - min_max.first)/(min_max.second - min_max.first);
-		cv::Mat ch2_image = (ch2_slice.image.clone() - min_max.first)/(min_max.second - min_max.first);
-		cv::Mat ch4_image = (ch4_slice.image.clone() - min_max.first)/(min_max.second - min_max.first);
+		cv::Mat cur_image = (cur_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
+		cv::Mat ch2_image = (ch2_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
+		cv::Mat ch4_image = (ch4_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
 
 		double roi_sz = 0.2 * cur_slice.image.cols;
 		cv::Rect roi(inter.p_sax - cv::Point2d{ roi_sz, roi_sz }, inter.p_sax + cv::Point2d{ roi_sz, roi_sz });
@@ -336,6 +342,66 @@ int main(int argc, char ** argv)
 			cur_image.convertTo(cur_image, CV_32FC1);
 			ch2_image.convertTo(ch2_image, CV_32FC1);
 			ch4_image.convertTo(ch4_image, CV_32FC1);
+
+			if (false) {
+				cv::RotatedRect rect;
+				cv::Point img_point = cur_slice.point_to_image(inter.p);
+				const double width = 0.2 * img.cols;
+				cv::Rect roi(img_point - cv::Point(width, width), img_point + cv::Point(width, width));
+
+				cv::Mat1f img = cv::Mat1f(cur_image.clone());
+				cv::Mat1f img_roi = img(roi);
+				{
+					cv::Ptr<cv::ml::EM> gmm = cv::ml::EM::create();
+
+					cv::Mat1f samples(0, 1);
+					for (size_t i = 0; i < img_roi.rows; i++) {
+						for (size_t j = 0; j < img_roi.cols; j++) {
+							samples.push_back(img_roi(i, j));
+						}
+					}
+
+					gmm->setClustersNumber(3);
+					gmm->setCovarianceMatrixType(cv::ml::EM::COV_MAT_SPHERICAL);
+					gmm->setTermCriteria(cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 300, 0.1));
+					cv::Mat labels;
+					gmm->trainEM(samples, cv::noArray(), labels, cv::noArray());
+
+					labels = labels.reshape(1, img_roi.rows);
+					cv::imshow("gmm segmentation", cv::Mat1f(labels) / 3.);
+				}
+				
+				cv::Mat1f kernel = cv::getGaussianKernel(roi.width, 0.3*((roi.width - 1)*0.5 - 1) + 0.8, CV_32FC1);
+				kernel /= kernel(roi.width / 2);
+				kernel = kernel * kernel.t();
+				cv::Mat1f dx, dy, magnitude;
+				cv::Sobel(img_roi, dx, CV_32FC1, 1, 0);
+				cv::Sobel(img_roi, dy, CV_32FC1, 0, 1);
+				cv::magnitude(dx, dy, magnitude);
+
+				cv::Mat1f weighed_magnitude = magnitude.mul(kernel);
+
+				double wmmax;
+				cv::minMaxLoc(weighed_magnitude, nullptr, &wmmax);
+				weighed_magnitude /= wmmax;
+
+				std::vector<cv::Point> points;
+				std::vector<double> weights;
+
+				for (size_t i = 0; i < weighed_magnitude.rows; i++) {
+					for (size_t j = 0; j < weighed_magnitude.cols; j++) {
+						if (i % 2 && j % 2 && weighed_magnitude(cv::Point(j, i)) > 0.) {
+							points.push_back(cv::Point(j, i));
+							weights.push_back(weighed_magnitude(cv::Point(j, i)));
+						}
+					}
+				}
+
+				rect = ::fitEllipse(points, weights);
+				rect.center += cv::Point2f(img_point) - cv::Point2f(width, width);
+				cv::imshow("ROI magnitude", weighed_magnitude);
+				//cv::ellipse(cur_image, rect, cv::Scalar(1., 0., 1.));
+			}
 			cv::cvtColor(cur_image, cur_image, cv::COLOR_GRAY2BGR);
 			cv::cvtColor(ch2_image, ch2_image, cv::COLOR_GRAY2BGR);
 			cv::cvtColor(ch4_image, ch4_image, cv::COLOR_GRAY2BGR);
@@ -432,7 +498,8 @@ int main(int argc, char ** argv)
 	cv::circle(imgc, cv::Point(point.x * pixel_scale, point.y * pixel_scale), 2, cv::Scalar(255., 0., 0.), -1);
 	
 	if (false && contours[target_idx].size() > 20) {
-		cv::RotatedRect box = ::fitEllipse(contours[target_idx], seed, img.size());
+		throw;
+		cv::RotatedRect box;// = ::fitEllipse(contours[target_idx], seed, img.size());
 		cv::ellipse(imgc, box, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
 	}
 

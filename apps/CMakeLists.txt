@@ -14,6 +14,7 @@ function(add_application_target name sources headers)
 endfunction()
 
 # sandbox applications
+add_application_target(train_HOG "" "")
 add_application_target(test_mrf "" "")
 add_application_target(test_slic "" "")
 add_application_target(test_dicom "" "")

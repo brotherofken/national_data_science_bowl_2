@@ -94,24 +94,38 @@ std::pair<double, double> get_quantile_uchar(cv::Mat &input, cv::MatND &hist, do
 }
 
 int main() {
-	const int img_num = 500; // WHATTA FUCK
+	const int img_num = 500; // WHATTA
 	const int candidate_pixel_num = 100; // TOO MUCH
 	const int fern_pixel_num = 5;
 	const int first_level_num = 10; // cascades
 	const int second_level_num = 250; // trees per cascade
 	const int landmark_num = 16;
 	const int initial_number = 20;
+	bool show_train = true;
+
 	std::vector<cv::Mat1b> images;
 	std::vector<BoundingBox> bbox;
 
 	std::cout << "Read images..." << std::endl;
 	std::vector<cv::Mat1d> ground_truth_shapes;
 	std::vector<BoundingBox> bounding_box;
-	std::ifstream fin("dataset/lv_keypoints16_train.txt");
+	std::ifstream fin("dataset/lv_keypointse16_train.txt");
 	for (int i = 0; i < img_num; i++) {
 		std::string image_name;
 		BoundingBox bbox;
 		fin >> image_name >> bbox.start_x >> bbox.start_y >> bbox.width >> bbox.height;
+		if (bbox.width > bbox.height) {
+			bbox.start_y -= (bbox.width - bbox.height) / 2;
+			bbox.height = bbox.width;
+		} else {
+			bbox.start_x -= (bbox.height - bbox.width) / 2;
+			bbox.width = bbox.height;
+		}
+		bbox.start_x -= 0.15 * bbox.width;
+		bbox.start_y -= 0.15 * bbox.height;
+		bbox.width *= 1.3;
+		bbox.height *= 1.3;
+
 
 		cv::Mat1d imaged = read_dcm(image_name);
 		cv::Mat hist;
@@ -126,11 +140,35 @@ int main() {
 		bbox.centroid_y = bbox.start_y + bbox.height / 2.0;
 		bounding_box.push_back(bbox);
 		
+		{
+			cv::Rect roi(bbox.start_x, bbox.start_y, bbox.width, bbox.height);
+			cv::Mat1d sample;
+			cv::resize(imaged(roi) * 255, sample, cv::Size(32, 32), 0, 0, cv::INTER_CUBIC);
+			cv::imwrite("samples/" + std::to_string(i) + ".png", sample);
+		}
 		cv::Mat1d landmarks(landmark_num, 2);
 		for (int j = 0; j < landmark_num; j++) {
 			fin >> landmarks(j, 0) >> landmarks(j, 1);
 		}
+
 		ground_truth_shapes.push_back(landmarks);
+
+		if (show_train) {
+			cv::Mat test_image_1 = images.back().clone();
+			cv::cvtColor(test_image_1, test_image_1, CV_GRAY2BGR);
+			double scale = 512. / test_image_1.cols;
+			cv::resize(test_image_1, test_image_1, cv::Size(), scale, scale);
+
+			cv::putText(test_image_1, image_name, cv::Point(15, 15), CV_FONT_HERSHEY_COMPLEX, 0.4, cv::Scalar(255, 255, 255));
+			for (int i = 0; i < landmark_num; i++) {
+				circle(test_image_1, cv::Point2d(landmarks(i, 0), landmarks(i, 1))*scale, 1, cv::Scalar(0, 255, 0), -1, 8, 0);
+			}
+			cv::Rect roi(bbox.start_x*scale, bbox.start_y*scale, bbox.width*scale, bbox.height*scale);
+			cv::rectangle(test_image_1, roi, cv::Scalar(255, 0, 0));
+			imshow("gt", test_image_1);
+			int key = cv::waitKey(0);
+			show_train = key != 'q';
+		}
 	}
 	fin.close();
 

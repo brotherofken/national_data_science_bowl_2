@@ -129,9 +129,11 @@ def contour_to_landmarks(contour):
 
     point_top = middle_point(contour[np.where( contour[:,1] == contour_min[1])])
     point_bottom = middle_point(contour[np.where( contour[:,1] == contour_max[1])])
-    point_left = middle_point(contour[np.where( contour[:,0] == contour_min[0])])
-    point_right = middle_point(contour[np.where( contour[:,0] == contour_max[0])])
-    lm_4 =  [point_index(contour, p) for p in (point_top, point_right, point_bottom, point_left)]
+#    point_left = middle_point(contour[np.where( contour[:,0] == contour_min[0])])
+#    point_right = middle_point(contour[np.where( contour[:,0] == contour_max[0])])
+    lm_2 =  [point_index(contour, p) for p in (point_top, point_bottom)]
+    lm_4 = double_landmarks(contour, lm_2)
+    #lm_4 =  [point_index(contour, p) for p in (point_top, point_right, point_bottom, point_left)]
     lm_8 = double_landmarks(contour, lm_4)
     lm_16 = double_landmarks(contour, lm_8)
    
@@ -159,7 +161,7 @@ if False:
     input_file_name = '../../data/train/1.pts'
 # In[]
 input_file_name = sys.argv[1] 
-output_file_name = input_file_name[:-4] + '_boxed16.lms'
+output_file_name = input_file_name[:-4] + '_boxede16.lms'
 contours = read_contours(input_file_name)
 
 # In[]    

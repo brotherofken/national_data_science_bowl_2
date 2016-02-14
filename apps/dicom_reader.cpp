@@ -48,6 +48,45 @@ namespace {
 		boost::split(strs, str, boost::is_any_of(delimeters));
 		return strs;
 	}
+
+
+	std::pair<double, double> get_quantile_uchar(cv::Mat &input, cv::MatND &hist, double nmin, double nmax, int channel = 0)
+	{
+		double imin, imax;
+		cv::minMaxLoc(input, &imin, &imax);
+
+		int const hist_size = 100;// std::numeric_limits<uchar>::max() + 1;
+		float const hranges[2] = { imin, imax };
+		float const *ranges[] = { hranges };
+
+		//compute and cumulate the histogram
+		cv::Mat1f inputf;
+		input.convertTo(inputf, inputf.type());
+		cv::calcHist(&inputf, 1, &channel, cv::Mat(), hist, 1, &hist_size, ranges);
+		hist /= cv::sum(hist)[0];
+		auto *hist_ptr = hist.ptr<float>(0);
+		for (size_t i = 1; i != hist_size; ++i) {
+			hist_ptr[i] += hist_ptr[i - 1];
+		}
+
+		// get the new min/max
+		std::pair<size_t, size_t> min_max(0, hist_size - 1);
+		while (min_max.first != (hist_size - 1) && hist_ptr[min_max.first] <= nmin) {
+			++min_max.first; // the corresponding histogram value is the current cell position
+		}
+
+		while (min_max.second > 0 && hist_ptr[min_max.second] > nmax) {
+			--min_max.second; // the corresponding histogram value is the current cell position
+		}
+
+		if (min_max.second < hist_size - 2)
+			++min_max.second;
+
+		min_max = { imin * (min_max.first / 100.), imax * (min_max.second / 100.) };
+
+		return min_max;
+	}
+
 }
 
 size_t get_frame_number(const std::string& dcm_filename)
@@ -88,8 +127,17 @@ Slice::Slice(const std::string& filename)
 
 		const unsigned int size_x = gimage.GetDimensions()[0];
 		const unsigned int size_y = gimage.GetDimensions()[1];
-		image = cv::Mat1d(size_y, size_x);
-		std::copy(vbuffer.begin(), vbuffer.end(), image.begin());
+		cv::Mat1d imaged = cv::Mat1d(size_y, size_x);
+		std::copy(vbuffer.begin(), vbuffer.end(), imaged.begin());
+
+		cv::Mat hist;
+		const auto minmax = get_quantile_uchar(imaged, hist, 0.1, 0.95);
+		imaged = (imaged - minmax.first) / (minmax.second - minmax.first);
+		imaged.setTo(1, imaged > 1.0);
+		image = imaged;
+		//imaged.convertTo(image, image.type(), 255);
+		//test_images.push_back(image);
+
 
 		// Read non-image fields
 

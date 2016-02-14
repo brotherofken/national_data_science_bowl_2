@@ -79,9 +79,10 @@ int main(int argc, char *argv[]) {
 	cv::resize(image_uc, image_uc, cv::Size(), 2.0, 2.0);
 	cv::Mat3b lab_image_uc;
 	cv::cvtColor(image_uc, lab_image_uc, cv::COLOR_BGR2Lab);
-	cv::Mat3d image, lab_image;
-	lab_image_uc.convertTo(lab_image, CV_64FC3);
-	image_uc.convertTo(image, CV_64FC3, 1 / 255.);
+	cv::Mat1d lab_image;
+	image_dcm.convertTo(lab_image, CV_64FC1);
+	cv::Mat3d image;
+	cv::merge(std::vector<cv::Mat1d>(3, lab_image / 255), image);
 
     // Get number of superpixels and threshold
 	const int superpixel_num = std::stoi(argv[2]);

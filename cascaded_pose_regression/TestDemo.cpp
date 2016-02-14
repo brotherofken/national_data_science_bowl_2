@@ -25,6 +25,8 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
+#include <opencv2/ml.hpp>
+
 #include "FaceAlignment.h"
 using namespace std;
 using namespace cv;
@@ -100,15 +102,30 @@ int main(){
     vector<BoundingBox> test_bounding_box;
 	std::vector<cv::Mat1d> ground_truth_shapes;
     int test_img_num = 49;
-    int initial_number = 2;
+    int initial_number = 20;
     int landmark_num = 16;
 
-	std::ifstream fin("dataset/lv_keypoints16_test.txt");
+	std::ifstream fin("dataset/lv_keypointse16_test.txt");
+
+	bool load_landmarks = true;
 
 	for (int i = 0; i < test_img_num; i++) {
 		std::string image_name;
 		BoundingBox bbox;
 		fin >> image_name >> bbox.start_x >> bbox.start_y >> bbox.width >> bbox.height;
+		if (bbox.width > bbox.height) {
+			bbox.start_y -= (bbox.width - bbox.height) / 2;
+			bbox.height = bbox.width;
+		}
+		else {
+			bbox.start_x -= (bbox.height - bbox.width) / 2;
+			bbox.width = bbox.height;
+		}
+		bbox.start_x -= 0.15 * bbox.width;
+		bbox.start_y -= 0.15 * bbox.height;
+		bbox.width *= 1.3;
+		bbox.height *= 1.3;
+
 		names.push_back(image_name);
 		cv::Mat1d imaged = read_dcm(image_name);
 		cv::Mat hist;
@@ -127,52 +144,45 @@ int main(){
 		for (int j = 0; j < landmark_num; j++) {
 			fin >> landmarks(j, 0) >> landmarks(j, 1);
 		}
-		ground_truth_shapes.push_back(landmarks);
+		if (load_landmarks) {
+			ground_truth_shapes.push_back(landmarks);
+		}
 	}
 	fin.close();
 
-    //for(int i = 0;i < test_img_num;i++){
-    //    string image_name = "./../../../Data/COFW_Dataset/testImages/";
-    //    image_name = image_name + to_string(i+1) + ".jpg";
-    //    Mat_<uchar> temp = imread(image_name,0);
-    //    test_images.push_back(temp);
-    //}
-    //fin.open("./../../../Data/COFW_Dataset/boundingbox_test.txt");
-    //for(int i = 0;i < test_img_num;i++){
-    //    BoundingBox temp;
-    //    fin>>temp.start_x>>temp.start_y>>temp.width>>temp.height;
-    //    temp.centroid_x = temp.start_x + temp.width/2.0;
-    //    temp.centroid_y = temp.start_y + temp.height/2.0; 
-    //    test_bounding_box.push_back(temp);
-    //}
-    //fin.close(); 
-    
-    ShapeRegressor regressor;
-    regressor.Load("model16.txt");
-	int index = 0;
-    while (true) {
-		index = index++ % test_images.size();
-        //cout<<"Input index:"<<endl;
-        //cin>>index;
+	cv::Ptr<cv::ml::EM> em_model = cv::ml::EM::create();
 
+
+    ShapeRegressor regressor;
+    regressor.Load("model.txt");
+	int index = 0;
+	int key = 0;
+    while (key != 'q') {
         Mat_<double> current_shape = regressor.Predict(test_images[index],test_bounding_box[index],initial_number);
         Mat test_image_1 = test_images[index].clone();
 
 		cv::cvtColor(test_image_1, test_image_1, CV_GRAY2BGR);
-		cv::Mat1d gt_shape = ground_truth_shapes[index];
+		cv::Mat1d gt_shape = load_landmarks ? ground_truth_shapes[index] : cv::Mat1d();
 
-		double scale = 512. / test_image_1.cols;
+		double scale = 1024. / test_image_1.cols;
 		cv::resize(test_image_1, test_image_1, cv::Size(), scale, scale);
 		cv::putText(test_image_1, std::to_string(index) + "/" + std::to_string(test_images.size()) + " " + names[index], cv::Point(15, 15), CV_FONT_HERSHEY_COMPLEX, 0.4, Scalar(255, 255, 0));
 
 		for (int i = 0; i < landmark_num; i++) {
-			cv::line(test_image_1, Point2d(current_shape(i, 0), current_shape(i, 1))*scale, Point2d(gt_shape(i, 0), gt_shape(i, 1))*scale, Scalar(255, 0, 0));
+			if (!gt_shape.empty()) {
+				//cv::line(test_image_1, Point2d(current_shape(i, 0), current_shape(i, 1))*scale, Point2d(gt_shape(i, 0), gt_shape(i, 1))*scale, Scalar(255, 0, 0));
+				circle(test_image_1, Point2d(gt_shape(i, 0), gt_shape(i, 1))*scale, 1, Scalar(0, 255, 0), -1, 8, 0);
+			}
 			circle(test_image_1, Point2d(current_shape(i, 0), current_shape(i, 1))*scale, 1, Scalar(0, 0, 255), -1, 8, 0);
-			circle(test_image_1, Point2d(gt_shape(i, 0), gt_shape(i, 1))*scale, 1, Scalar(0, 255, 0), -1, 8, 0);
 		}
+		cv::Rect roi(test_bounding_box[index].start_x*scale, test_bounding_box[index].start_y*scale, test_bounding_box[index].width*scale, test_bounding_box[index].height*scale);
+		cv::rectangle(test_image_1, roi, cv::Scalar(255, 0, 0));
 
         imshow("result",test_image_1);
-        waitKey(0);
+		
+		imwrite("results/"+std::to_string(index)+".png", test_image_1(roi));
+        key = waitKey(0);
+		index = (index + 1) % test_images.size();
     }
     return 0;
 }

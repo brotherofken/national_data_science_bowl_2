@@ -212,17 +212,11 @@ cv::Mat separate(const cv::Mat & img, const cv::Mat & u, bool invert /*= false*/
 	return selection;
 }
 
-cv::RotatedRect fitEllipse(const std::vector<cv::Point>& _points, const cv::Point& seed, const cv::Size& image_sz)
+cv::RotatedRect fitEllipse(const std::vector<cv::Point>& _points, const std::vector<double>& weights)
 {
 	using namespace cv;
 
-	std::vector<cv::Point> close_points;
-	for (size_t i{}; i < _points.size(); ++i) {
-		if (cv::norm(seed - _points[i]) < 0.15 * double(std::max(image_sz.width, image_sz.height)))
-			close_points.push_back(_points[i]);
-	}
-
-	Mat points = cv::Mat(close_points);
+	Mat points = cv::Mat(_points);
 	int i, n = points.checkVector(2);
 	int depth = points.depth();
 	CV_Assert(n >= 0 && (depth == CV_32F || depth == CV_32S));
@@ -268,19 +262,17 @@ cv::RotatedRect fitEllipse(const std::vector<cv::Point>& _points, const cv::Poin
 	}
 
 
-	std::vector<double> distances(close_points.size());
 	cv::Mat1d W = cv::Mat1d::eye(A.rows, A.rows);
-	for (size_t i{}; i < close_points.size(); ++i) {
-		distances[i] = cv::norm(seed - close_points[i]);
-		W(i, i) = 1 / distances[i];
+	for (size_t i{}; i < _points.size(); ++i) {
+		W(i, i) = weights[i];
 	}
 	double wmin, wmax;
 	cv::minMaxLoc(W, &wmin, &wmax);
 	W *= 1 / wmax;
 
-	cv::pow(W, 2, W);
+	//cv::pow(W, 0.5, W);
 
-	double l = 0.001;
+	double l = 1.;
 
 	cv::Mat1d Reg = cv::Mat1d::eye(A.cols, A.cols);
 	x = (A.t() * W * A + l * Reg).inv(DECOMP_SVD) * A.t() * W * b;
