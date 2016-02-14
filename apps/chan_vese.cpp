@@ -174,93 +174,6 @@ void on_mouse(int event, int x, int y, int, void * id)
 	}
 }
 
-
-void get_svm_detector(const cv::Ptr<cv::ml::SVM>& svm, std::vector<float> & hog_detector)
-{
-	// get the support vectors
-	cv::Mat sv = svm->getSupportVectors();
-	const int sv_total = sv.rows;
-	// get the decision function
-	cv::Mat alpha, svidx;
-	double rho = svm->getDecisionFunction(0, alpha, svidx);
-
-	CV_Assert(alpha.total() == 1 && svidx.total() == 1 && sv_total == 1);
-	CV_Assert((alpha.type() == CV_64F && alpha.at<double>(0) == 1.) ||
-		(alpha.type() == CV_32F && alpha.at<float>(0) == 1.f));
-	CV_Assert(sv.type() == CV_32F);
-	hog_detector.clear();
-
-	hog_detector.resize(sv.cols + 1);
-	memcpy(&hog_detector[0], sv.ptr(), sv.cols*sizeof(hog_detector[0]));
-	hog_detector[sv.cols] = (float)-rho;
-}
-
-void draw_locations(cv::Mat & img, const std::vector<cv::Rect> & locations, const cv::Scalar & color)
-{
-	if (!locations.empty())
-	{
-		std::vector<cv::Rect>::const_iterator loc = locations.begin();
-		std::vector<cv::Rect>::const_iterator end = locations.end();
-		for (; loc != end; ++loc) {
-			cv::rectangle(img, *loc, color, 2);
-		}
-	}
-}
-
-void detect_lv(const cv::Mat1d& imaged, const cv::Point approximate_location)
-{
-	char key = 27;
-	cv::Scalar reference(0, 255, 0);
-	cv::Scalar trained(0, 0, 255);
-	cv::Mat img, draw;
-	cv::Ptr<cv::ml::SVM> svm;
-	cv::HOGDescriptor my_hog;
-	my_hog.winSize = cv::Size(32, 32);
-	std::vector<cv::Rect> locations;
-
-	// Load the trained SVM.
-	svm = cv::ml::StatModel::load<cv::ml::SVM>("lv_detector.yml");
-	// Set the trained svm to my_hog
-	std::vector<float> hog_detector;
-	get_svm_detector(svm, hog_detector);
-	my_hog.setSVMDetector(hog_detector);
-
-	// Open the camera.
-	int test_img_num = 49;
-	int landmark_num = 16;
-
-	draw = imaged.clone();
-
-	cv::Mat1b image;
-	imaged.convertTo(image, image.type(), 255);
-	locations.clear();
-	my_hog.detectMultiScale(image, locations, -0.65, cv::Size(2, 2), cv::Size(-10, -10), 1.3, 2);
-
-	draw_locations(draw, locations, reference);
-
-	auto dist_to_lv = [&approximate_location](cv::Rect& r) {
-		return cv::norm((r.tl() + r.br()) / 2 - approximate_location);
-	};
-
-	cv::Rect closest_rect = *std::min_element(locations.begin(), locations.end(), [&](cv::Rect& a, cv::Rect& b) {
-		return dist_to_lv(a) < dist_to_lv(b);
-	});
-	if (dist_to_lv(closest_rect) < 0.1 * imaged.cols) {
-		locations = { closest_rect };
-	} else {
-		locations = {};
-	}
-
-	cv::merge(std::vector<cv::Mat1d>(3, draw), draw);
-	draw_locations(draw, locations, trained);
-	cv::imshow("LV_detection", draw);
-	static int i = 0;
-	cv::imwrite("tmp/LV_detection_" + std::to_string(i++) + ".png", draw * 255);
-	cv::waitKey(1);
-}
-
-
-
 enum Keys {
 	Down  = 's',
 	Left  = 'a',
@@ -351,7 +264,6 @@ int main(int argc, char ** argv)
 	int key = 0;
 	int superpixel_num = 200;
 
-	bool apply_slic = false;
 	Slic slic;
 
 	while (key != 'q') {
@@ -400,8 +312,6 @@ int main(int argc, char ** argv)
 		cv::Mat ch2_image = (ch2_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
 		cv::Mat ch4_image = (ch4_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
 
-		detect_lv(cur_image, inter.p_sax);
-
 		double roi_sz = 0.2 * cur_slice.image.cols;
 		cv::Rect roi(inter.p_sax - cv::Point2d{ roi_sz, roi_sz }, inter.p_sax + cv::Point2d{ roi_sz, roi_sz });
 		roi = roi & cv::Rect({ 0, 0 }, cur_image.size());
@@ -410,10 +320,9 @@ int main(int argc, char ** argv)
 		const double nc = 0.2;
 
 		// Apply SLIC
-		if (apply_slic) {
-			slic.generate_superpixels(cv::Mat1d(cur_image), superpixel_num, nc, roi);
-			slic.create_connectivity(cv::Mat1d(cur_image));
-		}
+		slic.generate_superpixels(cv::Mat1d(cur_image), superpixel_num, nc, roi);
+		slic.create_connectivity(cv::Mat1d(cur_image));
+
 		cv::Mat3d slic_result;
 		cv::merge(std::vector<cv::Mat1d>{ cur_image,cur_image,cur_image }, slic_result);
 		slic_result = slic_result(roi);
@@ -421,11 +330,11 @@ int main(int argc, char ** argv)
 		// Drawing
 		{
 			const double max = 1;
-			if (apply_slic) {
-				slic.display_contours(slic_result, cv::Vec3d(0, 0, 0.5 * max), 3.0);
-				//slic.colour_with_cluster_means(slic_result);
-				cur_slice.aux["SLIC"] = slic_result.clone();
-			}
+
+			slic.display_contours(slic_result, cv::Vec3d(0, 0, 0.5 * max), 3.0);
+			//slic.colour_with_cluster_means(slic_result);
+			cur_slice.aux["SLIC"] = slic_result.clone();
+
 			const double val_sax = cv::mean(cur_image(cv::Rect(inter.p_sax - cv::Point2d{ 1,1 }, inter.p_sax + cv::Point2d{ 1,1 })))[0];
 			const double val_ch2 = cv::mean(ch2_image(cv::Rect(inter.p_ch2 - cv::Point2d{ 1,1 }, inter.p_ch2 + cv::Point2d{ 1,1 })))[0];
 			const double val_ch4 = cv::mean(ch4_image(cv::Rect(inter.p_ch4 - cv::Point2d{ 1,1 }, inter.p_ch4 + cv::Point2d{ 1,1 })))[0];
@@ -434,65 +343,6 @@ int main(int argc, char ** argv)
 			ch2_image.convertTo(ch2_image, CV_32FC1);
 			ch4_image.convertTo(ch4_image, CV_32FC1);
 
-			if (false) {
-				cv::RotatedRect rect;
-				cv::Point img_point = cur_slice.point_to_image(inter.p);
-				const double width = 0.2 * img.cols;
-				cv::Rect roi(img_point - cv::Point(width, width), img_point + cv::Point(width, width));
-
-				cv::Mat1f img = cv::Mat1f(cur_image.clone());
-				cv::Mat1f img_roi = img(roi);
-				{
-					cv::Ptr<cv::ml::EM> gmm = cv::ml::EM::create();
-
-					cv::Mat1f samples(0, 1);
-					for (size_t i = 0; i < img_roi.rows; i++) {
-						for (size_t j = 0; j < img_roi.cols; j++) {
-							samples.push_back(img_roi(i, j));
-						}
-					}
-
-					gmm->setClustersNumber(3);
-					gmm->setCovarianceMatrixType(cv::ml::EM::COV_MAT_SPHERICAL);
-					gmm->setTermCriteria(cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 300, 0.1));
-					cv::Mat labels;
-					gmm->trainEM(samples, cv::noArray(), labels, cv::noArray());
-
-					labels = labels.reshape(1, img_roi.rows);
-					cv::imshow("gmm segmentation", cv::Mat1f(labels) / 3.);
-				}
-				
-				cv::Mat1f kernel = cv::getGaussianKernel(roi.width, 0.3*((roi.width - 1)*0.5 - 1) + 0.8, CV_32FC1);
-				kernel /= kernel(roi.width / 2);
-				kernel = kernel * kernel.t();
-				cv::Mat1f dx, dy, magnitude;
-				cv::Sobel(img_roi, dx, CV_32FC1, 1, 0);
-				cv::Sobel(img_roi, dy, CV_32FC1, 0, 1);
-				cv::magnitude(dx, dy, magnitude);
-
-				cv::Mat1f weighed_magnitude = magnitude.mul(kernel);
-
-				double wmmax;
-				cv::minMaxLoc(weighed_magnitude, nullptr, &wmmax);
-				weighed_magnitude /= wmmax;
-
-				std::vector<cv::Point> points;
-				std::vector<double> weights;
-
-				for (size_t i = 0; i < weighed_magnitude.rows; i++) {
-					for (size_t j = 0; j < weighed_magnitude.cols; j++) {
-						if (i % 2 && j % 2 && weighed_magnitude(cv::Point(j, i)) > 0.) {
-							points.push_back(cv::Point(j, i));
-							weights.push_back(weighed_magnitude(cv::Point(j, i)));
-						}
-					}
-				}
-
-				rect = ::fitEllipse(points, weights);
-				rect.center += cv::Point2f(img_point) - cv::Point2f(width, width);
-				cv::imshow("ROI magnitude", weighed_magnitude);
-				//cv::ellipse(cur_image, rect, cv::Scalar(1., 0., 1.));
-			}
 			cv::cvtColor(cur_image, cur_image, cv::COLOR_GRAY2BGR);
 			cv::cvtColor(ch2_image, ch2_image, cv::COLOR_GRAY2BGR);
 			cv::cvtColor(ch4_image, ch4_image, cv::COLOR_GRAY2BGR);
@@ -534,6 +384,8 @@ int main(int argc, char ** argv)
 		key = cv::waitKey();
 	}
 	return 0;
+
+#if 0
 	//-- Determine the constants and define functionals
 	cv_args.max_steps = cv_args.max_steps < 0 ? std::numeric_limits<int>::max() : cv_args.max_steps;
 	double max_size(std::max(img.cols, img.rows));
@@ -625,4 +477,5 @@ int main(int argc, char ** argv)
 
 	if (show_windows) cv::waitKey();
 	return EXIT_SUCCESS;
+#endif
 }

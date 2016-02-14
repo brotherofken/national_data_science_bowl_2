@@ -39,3 +39,8 @@ add_application_target(cpr_test "${SOURCE}" "${HEADERS}")
 add_application_target(hog_train "dicom_reader.cpp" "dicom_reader.hpp")
 add_application_target(hog_prepare_samples "dicom_reader.cpp" "dicom_reader.hpp")
 
+
+# End-to-end
+SET(SOURCE dicom_reader.cpp contour_extraction.cpp)
+SET(HEADERS dicom_reader.hpp contour_extraction.hpp)
+add_application_target(compute_volume "${SOURCE}" "${HEADERS}")
