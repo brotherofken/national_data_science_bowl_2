@@ -13,3 +13,5 @@ install(EXPORT liblocal_opencvConfig
    DESTINATION lib/cmake/liblocal_opencv)
 
 install(FILES slic.hpp seeds.hpp DESTINATION include)
+
+set_property(TARGET liblocal_opencv PROPERTY FOLDER libs)

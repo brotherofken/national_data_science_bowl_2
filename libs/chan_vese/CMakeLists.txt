@@ -27,3 +27,5 @@ install(EXPORT libchan_veseConfig
    DESTINATION lib/cmake/libchan_vese)
 
 install(FILES chan_vese.h DESTINATION include)
+
+set_property(TARGET libchan_vese PROPERTY FOLDER libs)

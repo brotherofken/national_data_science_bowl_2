@@ -14,3 +14,5 @@ install(EXPORT libslicConfig
    DESTINATION lib/cmake/libslic)
 
 install(FILES slic.h DESTINATION include)
+
+set_property(TARGET libslic PROPERTY FOLDER libs)

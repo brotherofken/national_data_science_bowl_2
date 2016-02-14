@@ -22,3 +22,5 @@ install(EXPORT libmrfConfig
 install(FILES ${HEADERS} DESTINATION include)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+
+set_property(TARGET libmrf PROPERTY FOLDER libs)

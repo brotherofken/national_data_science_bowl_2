@@ -11,25 +11,31 @@ function(add_application_target name sources headers)
 
 	target_link_libraries(${name} libslic liblocal_opencv libmrf libchan_vese ${OpenCV_LIBS} ${Boost_LIBRARIES} gdcmCommon gdcmcharls gdcmMEXD gdcmMSFF)
 	install(TARGETS ${name} RUNTIME DESTINATION bin)
+	set_property(TARGET ${name} PROPERTY FOLDER apps)
 endfunction()
 
 # sandbox applications
-add_application_target(train_HOG "" "")
 add_application_target(test_mrf "" "")
 add_application_target(test_slic "" "")
 add_application_target(test_dicom "" "")
 
 add_application_target(annotate_lv "" "")
 
-SET(SOURCE
-  dicom_reader.cpp
-  contour_extraction.cpp
-)
-
-SET(HEADERS
-  dicom_reader.hpp
-  contour_extraction.hpp
-)
-
+# Chan-Vese segmentation attempt
+SET(SOURCE dicom_reader.cpp contour_extraction.cpp)
+SET(HEADERS dicom_reader.hpp contour_extraction.hpp)
 add_application_target(chan_vese "${SOURCE}" "${HEADERS}")
-	
+
+# Cascaded pose regression binaries
+SET(SOURCE  ./cpr/FernCascade.cpp ./cpr/Fern.cpp ./cpr/ShapeRegressor.cpp ./cpr/Utils.cpp)
+SET(HEADERS ./cpr/FaceAlignment.h)
+add_application_target(cpr_train "${SOURCE}" "${HEADERS}")
+
+SET(SOURCE  ./cpr/FernCascade.cpp ./cpr/Fern.cpp ./cpr/ShapeRegressor.cpp ./cpr/Utils.cpp)
+SET(HEADERS ./cpr/FaceAlignment.h)
+add_application_target(cpr_test "${SOURCE}" "${HEADERS}")
+
+# HOG object detection
+add_application_target(hog_train "dicom_reader.cpp" "dicom_reader.hpp")
+add_application_target(hog_prepare_samples "dicom_reader.cpp" "dicom_reader.hpp")
+
