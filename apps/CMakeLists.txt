@@ -27,12 +27,12 @@ SET(HEADERS dicom_reader.hpp contour_extraction.hpp)
 add_application_target(chan_vese "${SOURCE}" "${HEADERS}")
 
 # Cascaded pose regression binaries
-SET(SOURCE  ./cpr/FernCascade.cpp ./cpr/Fern.cpp ./cpr/ShapeRegressor.cpp ./cpr/Utils.cpp)
-SET(HEADERS ./cpr/FaceAlignment.h)
+SET(SOURCE  dicom_reader.cpp hog_lv_detector.cpp ./cpr/FernCascade.cpp ./cpr/Fern.cpp ./cpr/ShapeRegressor.cpp ./cpr/Utils.cpp)
+SET(HEADERS dicom_reader.hpp hog_lv_detector.hpp ./cpr/FaceAlignment.h)
 add_application_target(cpr_train "${SOURCE}" "${HEADERS}")
 
-SET(SOURCE  ./cpr/FernCascade.cpp ./cpr/Fern.cpp ./cpr/ShapeRegressor.cpp ./cpr/Utils.cpp)
-SET(HEADERS ./cpr/FaceAlignment.h)
+SET(SOURCE  dicom_reader.cpp hog_lv_detector.cpp ./cpr/FernCascade.cpp ./cpr/Fern.cpp ./cpr/ShapeRegressor.cpp ./cpr/Utils.cpp)
+SET(HEADERS dicom_reader.hpp hog_lv_detector.hpp ./cpr/FaceAlignment.h)
 add_application_target(cpr_test "${SOURCE}" "${HEADERS}")
 
 # HOG object detection
@@ -41,6 +41,6 @@ add_application_target(hog_prepare_samples "dicom_reader.cpp" "dicom_reader.hpp"
 
 
 # End-to-end
-SET(SOURCE dicom_reader.cpp contour_extraction.cpp)
-SET(HEADERS dicom_reader.hpp contour_extraction.hpp)
+SET(SOURCE dicom_reader.cpp contour_extraction.cpp hog_lv_detector.cpp ./cpr/FernCascade.cpp ./cpr/Fern.cpp ./cpr/ShapeRegressor.cpp ./cpr/Utils.cpp)
+SET(HEADERS dicom_reader.hpp contour_extraction.hpp hog_lv_detector.hpp ./cpr/FaceAlignment.h)
 add_application_target(compute_volume "${SOURCE}" "${HEADERS}")

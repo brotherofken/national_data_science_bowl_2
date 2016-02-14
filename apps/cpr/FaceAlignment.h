@@ -45,22 +45,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <numeric>   
 #include <utility> 
 
-class BoundingBox{
-    public:
+struct BoundingBox{
         double start_x;
         double start_y;
         double width;
         double height;
         double centroid_x;
         double centroid_y;
-        BoundingBox(){
-            start_x = 0;
-            start_y = 0;
-            width = 0;
-            height = 0;
-            centroid_x = 0;
-            centroid_y = 0;
-        }; 
 };
 
 

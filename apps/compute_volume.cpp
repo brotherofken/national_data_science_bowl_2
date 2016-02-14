@@ -24,8 +24,10 @@
 #include <boost/filesystem/convenience.hpp>  // boost::filesystem::change_extension()
 
 #include "slic/slic.h"
-#include "dicom_reader.hpp"
+#include "cpr/FaceAlignment.h"
 #include "contour_extraction.hpp"
+#include "hog_lv_detector.hpp"
+#include "dicom_reader.hpp"
 
 /// Adds suffix to the file name
 std::string add_suffix(const std::string & path, const std::string & suffix, const std::string & delim = "_")
@@ -142,124 +144,6 @@ contours_t draw_global_mask(const double scale = 1.)
 	return hull;
 }
 
-void on_mouse(int event, int x, int y, int, void * id)
-{
-	Slic* ptr = static_cast<Slic*>(id);
-	if (event == cv::EVENT_LBUTTONDOWN) {
-		double scale = 256. / ptr->get_clusters().cols;
-		cv::Point p(x / scale, y / scale);
-		cv::Mat mask = ptr->get_clusters() == ptr->get_clusters()(p);
-
-		if (global_mask.empty()) {
-			global_mask = mask;
-		} else {
-			global_mask ^= mask;
-		}
-
-		contours_t contour = draw_global_mask(scale);
-
-		if (contour.size() == 1) {
-			global_contour = cv::Mat1d(0, 1);
-			cv::Rect roi = ptr->get_roi();
-			global_contour.push_back(roi.x);
-			global_contour.push_back(roi.y);
-			global_contour.push_back(roi.width);
-			global_contour.push_back(roi.height);
-
-			for (auto& p : contour[0]) {
-				global_contour.push_back(p.x);
-				global_contour.push_back(p.y);
-			}
-		}
-	}
-}
-
-
-void get_svm_detector(const cv::Ptr<cv::ml::SVM>& svm, std::vector<float> & hog_detector)
-{
-	// get the support vectors
-	cv::Mat sv = svm->getSupportVectors();
-	const int sv_total = sv.rows;
-	// get the decision function
-	cv::Mat alpha, svidx;
-	double rho = svm->getDecisionFunction(0, alpha, svidx);
-
-	CV_Assert(alpha.total() == 1 && svidx.total() == 1 && sv_total == 1);
-	CV_Assert((alpha.type() == CV_64F && alpha.at<double>(0) == 1.) ||
-		(alpha.type() == CV_32F && alpha.at<float>(0) == 1.f));
-	CV_Assert(sv.type() == CV_32F);
-	hog_detector.clear();
-
-	hog_detector.resize(sv.cols + 1);
-	memcpy(&hog_detector[0], sv.ptr(), sv.cols*sizeof(hog_detector[0]));
-	hog_detector[sv.cols] = (float)-rho;
-}
-
-void draw_locations(cv::Mat & img, const std::vector<cv::Rect> & locations, const cv::Scalar & color)
-{
-	if (!locations.empty())
-	{
-		std::vector<cv::Rect>::const_iterator loc = locations.begin();
-		std::vector<cv::Rect>::const_iterator end = locations.end();
-		for (; loc != end; ++loc) {
-			cv::rectangle(img, *loc, color, 2);
-		}
-	}
-}
-
-void detect_lv(const cv::Mat1d& imaged, const cv::Point approximate_location)
-{
-	char key = 27;
-	cv::Scalar reference(0, 255, 0);
-	cv::Scalar trained(0, 0, 255);
-	cv::Mat img, draw;
-	cv::Ptr<cv::ml::SVM> svm;
-	cv::HOGDescriptor my_hog;
-	my_hog.winSize = cv::Size(32, 32);
-	std::vector<cv::Rect> locations;
-
-	// Load the trained SVM.
-	svm = cv::ml::StatModel::load<cv::ml::SVM>("lv_detector.yml");
-	// Set the trained svm to my_hog
-	std::vector<float> hog_detector;
-	get_svm_detector(svm, hog_detector);
-	my_hog.setSVMDetector(hog_detector);
-
-	// Open the camera.
-	int test_img_num = 49;
-	int landmark_num = 16;
-
-	draw = imaged.clone();
-
-	cv::Mat1b image;
-	imaged.convertTo(image, image.type(), 255);
-	locations.clear();
-	my_hog.detectMultiScale(image, locations, -0.65, cv::Size(2, 2), cv::Size(-10, -10), 1.3, 2);
-
-	draw_locations(draw, locations, reference);
-
-	auto dist_to_lv = [&approximate_location](cv::Rect& r) {
-		return cv::norm((r.tl() + r.br()) / 2 - approximate_location);
-	};
-
-	cv::Rect closest_rect = *std::min_element(locations.begin(), locations.end(), [&](cv::Rect& a, cv::Rect& b) {
-		return dist_to_lv(a) < dist_to_lv(b);
-	});
-	if (dist_to_lv(closest_rect) < 0.1 * imaged.cols) {
-		locations = { closest_rect };
-	} else {
-		locations = {};
-	}
-
-	cv::merge(std::vector<cv::Mat1d>(3, draw), draw);
-	draw_locations(draw, locations, trained);
-	cv::imshow("LV_detection", draw);
-	static int i = 0;
-	cv::imwrite("tmp/LV_detection_" + std::to_string(i++) + ".png", draw * 255);
-	cv::waitKey(1);
-}
-
-
 
 enum Keys {
 	Down  = 's',
@@ -350,9 +234,12 @@ int main(int argc, char ** argv)
 	int slice_id = 0;
 	int key = 0;
 	int superpixel_num = 200;
+	size_t landmark_num = 16;
 
-	bool apply_slic = false;
-	Slic slic;
+	HogLvDetector lv_detector;
+
+	ShapeRegressor regressor;
+	regressor.Load("cpr_model_hog_detections.txt");
 
 	while (key != 'q') {
 		const int prev_sax_id = sax_id;
@@ -395,37 +282,25 @@ int main(int argc, char ** argv)
 			patient_data.save_contours();
 		}
 
-
 		cv::Mat cur_image = (cur_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
 		cv::Mat ch2_image = (ch2_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
 		cv::Mat ch4_image = (ch4_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
 
-		detect_lv(cur_image, inter.p_sax);
+		cv::Rect2d lv_rect = lv_detector.detect(cur_image, inter.p_sax, true);
+		BoundingBox lv_bbox = { lv_rect.x, lv_rect.y, lv_rect.width, lv_rect.height, lv_rect.x + lv_rect.width / 2.0, lv_rect.y + lv_rect.height / 2.0 };
+		
+		cv::Mat1b cur_image1b;
+		cur_image.convertTo(cur_image1b, cur_image1b.type(), 255);
+		cv::Mat1d current_shape = lv_rect.area() > 0 ? regressor.Predict(cur_image1b, lv_bbox, 1) : cv::Mat1d::zeros(1, landmark_num);
 
 		double roi_sz = 0.2 * cur_slice.image.cols;
 		cv::Rect roi(inter.p_sax - cv::Point2d{ roi_sz, roi_sz }, inter.p_sax + cv::Point2d{ roi_sz, roi_sz });
 		roi = roi & cv::Rect({ 0, 0 }, cur_image.size());
 
-		// SLIC
-		const double nc = 0.2;
-
-		// Apply SLIC
-		if (apply_slic) {
-			slic.generate_superpixels(cv::Mat1d(cur_image), superpixel_num, nc, roi);
-			slic.create_connectivity(cv::Mat1d(cur_image));
-		}
-		cv::Mat3d slic_result;
-		cv::merge(std::vector<cv::Mat1d>{ cur_image,cur_image,cur_image }, slic_result);
-		slic_result = slic_result(roi);
-
 		// Drawing
 		{
 			const double max = 1;
-			if (apply_slic) {
-				slic.display_contours(slic_result, cv::Vec3d(0, 0, 0.5 * max), 3.0);
-				//slic.colour_with_cluster_means(slic_result);
-				cur_slice.aux["SLIC"] = slic_result.clone();
-			}
+
 			const double val_sax = cv::mean(cur_image(cv::Rect(inter.p_sax - cv::Point2d{ 1,1 }, inter.p_sax + cv::Point2d{ 1,1 })))[0];
 			const double val_ch2 = cv::mean(ch2_image(cv::Rect(inter.p_ch2 - cv::Point2d{ 1,1 }, inter.p_ch2 + cv::Point2d{ 1,1 })))[0];
 			const double val_ch4 = cv::mean(ch4_image(cv::Rect(inter.p_ch4 - cv::Point2d{ 1,1 }, inter.p_ch4 + cv::Point2d{ 1,1 })))[0];
@@ -434,65 +309,6 @@ int main(int argc, char ** argv)
 			ch2_image.convertTo(ch2_image, CV_32FC1);
 			ch4_image.convertTo(ch4_image, CV_32FC1);
 
-			if (false) {
-				cv::RotatedRect rect;
-				cv::Point img_point = cur_slice.point_to_image(inter.p);
-				const double width = 0.2 * img.cols;
-				cv::Rect roi(img_point - cv::Point(width, width), img_point + cv::Point(width, width));
-
-				cv::Mat1f img = cv::Mat1f(cur_image.clone());
-				cv::Mat1f img_roi = img(roi);
-				{
-					cv::Ptr<cv::ml::EM> gmm = cv::ml::EM::create();
-
-					cv::Mat1f samples(0, 1);
-					for (size_t i = 0; i < img_roi.rows; i++) {
-						for (size_t j = 0; j < img_roi.cols; j++) {
-							samples.push_back(img_roi(i, j));
-						}
-					}
-
-					gmm->setClustersNumber(3);
-					gmm->setCovarianceMatrixType(cv::ml::EM::COV_MAT_SPHERICAL);
-					gmm->setTermCriteria(cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 300, 0.1));
-					cv::Mat labels;
-					gmm->trainEM(samples, cv::noArray(), labels, cv::noArray());
-
-					labels = labels.reshape(1, img_roi.rows);
-					cv::imshow("gmm segmentation", cv::Mat1f(labels) / 3.);
-				}
-				
-				cv::Mat1f kernel = cv::getGaussianKernel(roi.width, 0.3*((roi.width - 1)*0.5 - 1) + 0.8, CV_32FC1);
-				kernel /= kernel(roi.width / 2);
-				kernel = kernel * kernel.t();
-				cv::Mat1f dx, dy, magnitude;
-				cv::Sobel(img_roi, dx, CV_32FC1, 1, 0);
-				cv::Sobel(img_roi, dy, CV_32FC1, 0, 1);
-				cv::magnitude(dx, dy, magnitude);
-
-				cv::Mat1f weighed_magnitude = magnitude.mul(kernel);
-
-				double wmmax;
-				cv::minMaxLoc(weighed_magnitude, nullptr, &wmmax);
-				weighed_magnitude /= wmmax;
-
-				std::vector<cv::Point> points;
-				std::vector<double> weights;
-
-				for (size_t i = 0; i < weighed_magnitude.rows; i++) {
-					for (size_t j = 0; j < weighed_magnitude.cols; j++) {
-						if (i % 2 && j % 2 && weighed_magnitude(cv::Point(j, i)) > 0.) {
-							points.push_back(cv::Point(j, i));
-							weights.push_back(weighed_magnitude(cv::Point(j, i)));
-						}
-					}
-				}
-
-				rect = ::fitEllipse(points, weights);
-				rect.center += cv::Point2f(img_point) - cv::Point2f(width, width);
-				cv::imshow("ROI magnitude", weighed_magnitude);
-				//cv::ellipse(cur_image, rect, cv::Scalar(1., 0., 1.));
-			}
 			cv::cvtColor(cur_image, cur_image, cv::COLOR_GRAY2BGR);
 			cv::cvtColor(ch2_image, ch2_image, cv::COLOR_GRAY2BGR);
 			cv::cvtColor(ch4_image, ch4_image, cv::COLOR_GRAY2BGR);
@@ -513,10 +329,10 @@ int main(int argc, char ** argv)
 			cv::circle(ch2_image, inter.p_ch2, 2, cv::Scalar(0., 0., max), -1);
 			cv::circle(ch4_image, inter.p_ch4, 2, cv::Scalar(0., 0., max), -1);
 
-			cv::resize(cur_image, cur_image, cv::Size(0, 0), 256. / cur_image.cols, 256. / cur_image.cols, CV_INTER_LANCZOS4);
-			cv::resize(ch2_image, ch2_image, cv::Size(0, 0), 256. / ch2_image.cols, 256. / ch2_image.cols, CV_INTER_LANCZOS4);
-			cv::resize(ch4_image, ch4_image, cv::Size(0, 0), 256. / ch4_image.cols, 256. / ch4_image.cols, CV_INTER_LANCZOS4);
-			cv::resize(slic_result, slic_result, cv::Size(0, 0), 256. / slic_result.cols, 256. / slic_result.cols, CV_INTER_LANCZOS4);
+			const double scale = 256. / cur_image.cols;
+			cv::resize(cur_image, cur_image, cv::Size(0, 0), scale, scale, CV_INTER_LANCZOS4);
+			cv::resize(ch2_image, ch2_image, cv::Size(0, 0), scale, scale, CV_INTER_LANCZOS4);
+			cv::resize(ch4_image, ch4_image, cv::Size(0, 0), scale, scale, CV_INTER_LANCZOS4);
 
 			const std::string navigtaion_text = std::to_string(sax_id+1) + "/" + std::to_string(patient_data.sax_seqs.size()) + "   " + std::to_string(slice_id+1)+"/" + std::to_string(sequence_len);
 			cv::putText(cur_image, navigtaion_text, cv::Point(10, 15), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
@@ -525,104 +341,16 @@ int main(int argc, char ** argv)
 			cv::putText(ch2_image, std::to_string(val_ch2), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
 			cv::putText(ch4_image, std::to_string(val_ch4), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
 
+			for (int i = 0; i < landmark_num; i++) {
+				circle(cur_image, cv::Point2d(current_shape(i, 0), current_shape(i, 1)) * scale, 1, cv::Scalar(0, 0, 255), -1, 8, 0);
+			}
+
 			cv::imshow("cur_slice", cur_image);
+			cv::imwrite("tmp/slice_" + std::to_string(sax_id) + "_frame_" + std::to_string(slice_id) + ".png", 255*cur_image);
 			cv::imshow("ch2", ch2_image);
 			cv::imshow("ch4", ch4_image);
-			cv::imshow("slic_result", slic_result);
-			cv::setMouseCallback("slic_result", on_mouse, &slic);
 		}
 		key = cv::waitKey();
 	}
 	return 0;
-	//-- Determine the constants and define functionals
-	cv_args.max_steps = cv_args.max_steps < 0 ? std::numeric_limits<int>::max() : cv_args.max_steps;
-	double max_size(std::max(img.cols, img.rows));
-	double pixel_scale = 1.0;
-	if (max_size > 256) {
-		pixel_scale = 256. / max_size;
-		cv::resize(img, img, cv::Size(), pixel_scale, pixel_scale, cv::INTER_CUBIC);
-		max_size = std::max(img.cols, img.rows);
-	}
-
-#if 0
-	cv::Size ms_window_sz(8, 8);
-	cv::Rect ms_window(cv::Point(point.x * pixel_scale - ms_window_sz.width / 2, point.y * pixel_scale - ms_window_sz.height / 2), ms_window_sz);
-	cv::meanShift(img, ms_window, cv::TermCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 20, 1));
-	const cv::Point seed = (ms_window.br() + ms_window.tl()) / 2;
-#else
-	const cv::Point seed = mean_shift(img, { point.x * pixel_scale, point.y * pixel_scale });
-#endif
-
-	//-- Construct the level set
-	cv::Mat1d cv_init = cv::Mat1d::zeros(img.size());
-	cv::circle(cv_init, seed, 2, cv::Scalar::all(1), 1);
-
-
-	//-- Smooth the image with Perona-Malik
-	const cv::Mat1d abs_img = cv::abs(img - cv::mean(img(cv::Rect(seed - cv::Point(2, 2), cv::Size(5, 5))))[0]);
-	const cv::Mat smoothed_img = perona_malik(img, pm_args);
-
-	// Actual Chen-Vese segmentation
-	cv::Mat1d chan_vese_image = segmentation_chan_vese(smoothed_img, cv_init, cv_args);
-
-	//-- Select the region enclosed by the contour and save it to the disk
-	cv::Mat chan_vese_segmentation = separate(img, chan_vese_image);
-
-
-
-
-	std::vector<std::vector<cv::Point> > contours;
-	cv::Mat1b separated8uc;
-	chan_vese_segmentation.convertTo(separated8uc, CV_8UC1, 255);
-	separated8uc = separated8uc != 0;
-	findContours(separated8uc, contours, {}, CV_RETR_LIST, CV_CHAIN_APPROX_NONE);
-	size_t target_idx = std::distance(contours.begin(), std::find_if(contours.begin(), contours.end(), [&](std::vector<cv::Point>& contour) { return 0 < cv::pointPolygonTest(contour, seed, false); }));
-
-	cv::Mat1b final_mask = rectify_lv_segment(img, seed, contours, target_idx);
-
-	findContours(final_mask, contours, {}, CV_RETR_LIST, CV_CHAIN_APPROX_NONE);
-	target_idx = 0;
-
-	cv::Mat3d imgc;
-	cv::merge(std::vector<cv::Mat1d>{ img, img, img }, imgc);
-	cv::circle(imgc, seed, 2, cv::Scalar(0., 0., 255.), -1);
-	cv::circle(imgc, cv::Point(point.x * pixel_scale, point.y * pixel_scale), 2, cv::Scalar(255., 0., 0.), -1);
-	
-	if (false && contours[target_idx].size() > 20) {
-		throw;
-		cv::RotatedRect box;// = ::fitEllipse(contours[target_idx], seed, img.size());
-		cv::ellipse(imgc, box, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
-	}
-
-	cv::drawContours(imgc, contours, target_idx, cv::Scalar(0, 255, 0));
-
-	{
-		double min, max;
-		cv::minMaxLoc(smoothed_img, &min, &max);
-		cv::imwrite(add_suffix(input_filename, "pm") + ".png", smoothed_img);
-		cv::imwrite(add_suffix(input_filename, "selection") + ".png", chan_vese_segmentation);
-		cv::imwrite(add_suffix(input_filename, "contour") + ".png", imgc);
-
-		std::ofstream output(add_suffix(input_filename, "contour") + ".csv");
-		std::transform(contours[target_idx].begin(), contours[target_idx].end(), std::ostream_iterator<std::string>(output, ","),
-			[&](const cv::Point& p) {
-			return std::to_string(p.x / pixel_scale) + "," + std::to_string(p.y / pixel_scale);
-		});
-
-	}
-
-	if (show_windows) {
-		double min, max;
-		cv::minMaxLoc(img, &min, &max);
-		max *= 0.5;
-		chan_vese_segmentation = (chan_vese_segmentation - min) / (max - min);
-		imgc = (imgc - min) / (max - min);
-		cv::minMaxLoc(smoothed_img, &min, &max);
-		cv::imshow("input", imgc);
-		cv::imshow("smoothed", (smoothed_img - min) / (max - min));
-		cv::imshow("separated", chan_vese_segmentation);
-	}
-
-	if (show_windows) cv::waitKey();
-	return EXIT_SUCCESS;
 }

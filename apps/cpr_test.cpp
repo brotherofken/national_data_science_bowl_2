@@ -27,90 +27,31 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <opencv2/ml.hpp>
 
-#include "FaceAlignment.h"
+#include "cpr/FaceAlignment.h"
+#include "hog_lv_detector.hpp"
+#include "dicom_reader.hpp"
+
 using namespace std;
 using namespace cv;
 
-#include <gdcmImageReader.h>
-
-cv::Mat1d read_dcm(const std::string& filename)
-{
-	// Read DCM
-	gdcm::ImageReader ir;
-	ir.SetFileName(filename.c_str());
-	if (!ir.Read()) {
-		return cv::Mat1d();
-	}
-
-	//std::cout << "Getting image from ImageReader..." << std::endl;
-
-	const gdcm::Image &gimage = ir.GetImage();
-
-	std::vector<short> vbuffer(gimage.GetBufferLength());
-	gimage.GetBuffer((char*)&vbuffer[0]);
-
-	//const unsigned int* const dimension = gimage.GetDimensions();
-	const unsigned int size_x = gimage.GetDimensions()[0];
-	const unsigned int size_y = gimage.GetDimensions()[1];
-
-	cv::Mat1d image(size_y, size_x);
-
-	std::copy(vbuffer.begin(), vbuffer.end(), image.begin());
-	return image;
-}
-
-std::pair<double, double> get_quantile_uchar(cv::Mat &input, cv::MatND &hist, double nmin, double nmax, int channel = 0)
-{
-	double imin, imax;
-	cv::minMaxLoc(input, &imin, &imax);
-
-	int const hist_size = 100;// std::numeric_limits<uchar>::max() + 1;
-	float const hranges[2] = { imin, imax };
-	float const *ranges[] = { hranges };
-
-	//compute and cumulate the histogram
-	cv::Mat1f inputf;
-	input.convertTo(inputf, inputf.type());
-	cv::calcHist(&inputf, 1, &channel, cv::Mat(), hist, 1, &hist_size, ranges);
-	hist /= cv::sum(hist)[0];
-	auto *hist_ptr = hist.ptr<float>(0);
-	for (size_t i = 1; i != hist_size; ++i) {
-		hist_ptr[i] += hist_ptr[i - 1];
-	}
-
-	// get the new min/max
-	std::pair<size_t, size_t> min_max(0, hist_size - 1);
-	while (min_max.first != (hist_size - 1) && hist_ptr[min_max.first] <= nmin) {
-		++min_max.first; // the corresponding histogram value is the current cell position
-	}
-
-	while (min_max.second > 0 && hist_ptr[min_max.second] > nmax) {
-		--min_max.second; // the corresponding histogram value is the current cell position
-	}
-
-	if (min_max.second < hist_size - 2)
-		++min_max.second;
-
-	min_max = { imin * (min_max.first / 100.), imax * (min_max.second / 100.) };
-
-	return min_max;
-}
-
 int main(){
 	vector<string> names;
-    vector<Mat_<uchar> > test_images;
-    vector<BoundingBox> test_bounding_box;
+    vector<Mat1b> images;
+    vector<BoundingBox> bounding_box;
 	std::vector<cv::Mat1d> ground_truth_shapes;
-    int test_img_num = 49;
+    int img_num = 49;
     int initial_number = 20;
     int landmark_num = 16;
 
 	std::ifstream fin("dataset/lv_keypointse16_test.txt");
 
-	bool load_landmarks = true;
+	HogLvDetector lv_detector;
 
-	for (int i = 0; i < test_img_num; i++) {
+	bool show_train = true;
+
+	for (int i = 0; i < img_num; i++) {
 		std::string image_name;
+		names.push_back(image_name);
 		BoundingBox bbox;
 		fin >> image_name >> bbox.start_x >> bbox.start_y >> bbox.width >> bbox.height;
 		if (bbox.width > bbox.height) {
@@ -125,48 +66,67 @@ int main(){
 		bbox.start_y -= 0.15 * bbox.height;
 		bbox.width *= 1.3;
 		bbox.height *= 1.3;
-
-		names.push_back(image_name);
-		cv::Mat1d imaged = read_dcm(image_name);
-		cv::Mat hist;
-		const auto minmax = get_quantile_uchar(imaged, hist, 0.1, 0.95);
-		imaged = (imaged - minmax.first) / (minmax.second - minmax.first);
-		imaged.setTo(1, imaged > 1.0);
-		cv::Mat1b image;
-		imaged.convertTo(image, image.type(), 255);
-		test_images.push_back(image);
-
 		bbox.centroid_x = bbox.start_x + bbox.width / 2.0;
 		bbox.centroid_y = bbox.start_y + bbox.height / 2.0;
-		test_bounding_box.push_back(bbox);
 
 		cv::Mat1d landmarks(landmark_num, 2);
 		for (int j = 0; j < landmark_num; j++) {
 			fin >> landmarks(j, 0) >> landmarks(j, 1);
 		}
-		if (load_landmarks) {
-			ground_truth_shapes.push_back(landmarks);
+		ground_truth_shapes.push_back(landmarks);
+
+		// Read image
+		Slice slice(image_name);
+		cv::Mat1d imaged = slice.image.clone();
+
+		cv::Mat1b image;
+		imaged.convertTo(image, image.type(), 255);
+		images.push_back(image);
+
+		// Caculate contour mean point
+		cv::Scalar mean_point_tmp = cv::mean(landmarks.reshape(2, landmark_num / 2));
+		cv::Point mean_point(mean_point_tmp[0], mean_point_tmp[1]);
+
+		cv::Rect2d lv_rect = lv_detector.detect(imaged, mean_point, true);
+		BoundingBox lv_bbox = { lv_rect.x, lv_rect.y, lv_rect.width, lv_rect.height, lv_rect.x + lv_rect.width / 2.0, lv_rect.y + lv_rect.height / 2.0 };
+		bbox = lv_rect.area() > 0 ? lv_bbox : bbox;
+
+		bounding_box.push_back(bbox);
+
+		if (show_train) {
+			cv::Mat test_image_1 = images.back().clone();
+			cv::cvtColor(test_image_1, test_image_1, CV_GRAY2BGR);
+			double scale = 512. / test_image_1.cols;
+			cv::resize(test_image_1, test_image_1, cv::Size(), scale, scale);
+
+			cv::putText(test_image_1, image_name, cv::Point(15, 15), CV_FONT_HERSHEY_COMPLEX, 0.4, cv::Scalar(255, 255, 255));
+			for (int i = 0; i < landmark_num; i++) {
+				circle(test_image_1, cv::Point2d(landmarks(i, 0), landmarks(i, 1))*scale, 1, cv::Scalar(0, 255, 0), -1, 8, 0);
+			}
+			cv::Rect roi(bbox.start_x*scale, bbox.start_y*scale, bbox.width*scale, bbox.height*scale);
+			cv::rectangle(test_image_1, roi, cv::Scalar(255, 0, 0));
+			imshow("gt", test_image_1);
+			int key = cv::waitKey(0);
+			show_train = key != 'q';
 		}
 	}
+	cv::destroyWindow("gt");
 	fin.close();
 
-	cv::Ptr<cv::ml::EM> em_model = cv::ml::EM::create();
-
-
     ShapeRegressor regressor;
-    regressor.Load("model.txt");
+    regressor.Load("cpr_model_hog_detections.txt");
 	int index = 0;
 	int key = 0;
     while (key != 'q') {
-        Mat_<double> current_shape = regressor.Predict(test_images[index],test_bounding_box[index],initial_number);
-        Mat test_image_1 = test_images[index].clone();
+        Mat_<double> current_shape = regressor.Predict(images[index], bounding_box[index],initial_number);
+        Mat test_image_1 = images[index].clone();
 
 		cv::cvtColor(test_image_1, test_image_1, CV_GRAY2BGR);
-		cv::Mat1d gt_shape = load_landmarks ? ground_truth_shapes[index] : cv::Mat1d();
+		cv::Mat1d gt_shape = ground_truth_shapes[index];
 
 		double scale = 1024. / test_image_1.cols;
 		cv::resize(test_image_1, test_image_1, cv::Size(), scale, scale);
-		cv::putText(test_image_1, std::to_string(index) + "/" + std::to_string(test_images.size()) + " " + names[index], cv::Point(15, 15), CV_FONT_HERSHEY_COMPLEX, 0.4, Scalar(255, 255, 0));
+		cv::putText(test_image_1, std::to_string(index) + "/" + std::to_string(images.size()) + " " + names[index], cv::Point(15, 15), CV_FONT_HERSHEY_COMPLEX, 0.4, Scalar(255, 255, 0));
 
 		for (int i = 0; i < landmark_num; i++) {
 			if (!gt_shape.empty()) {
@@ -175,14 +135,14 @@ int main(){
 			}
 			circle(test_image_1, Point2d(current_shape(i, 0), current_shape(i, 1))*scale, 1, Scalar(0, 0, 255), -1, 8, 0);
 		}
-		cv::Rect roi(test_bounding_box[index].start_x*scale, test_bounding_box[index].start_y*scale, test_bounding_box[index].width*scale, test_bounding_box[index].height*scale);
+		cv::Rect roi(bounding_box[index].start_x*scale, bounding_box[index].start_y*scale, bounding_box[index].width*scale, bounding_box[index].height*scale);
 		cv::rectangle(test_image_1, roi, cv::Scalar(255, 0, 0));
 
         imshow("result",test_image_1);
 		
 		imwrite("results/"+std::to_string(index)+".png", test_image_1(roi));
         key = waitKey(0);
-		index = (index + 1) % test_images.size();
+		index = (index + 1) % images.size();
     }
     return 0;
 }
