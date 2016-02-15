@@ -278,8 +278,7 @@ Mat get_hogdescriptor_visu(const Mat& color_origImg, vector<float>& descriptorVa
 
 void compute_hog(const vector< Mat > & img_lst, vector< Mat > & gradient_lst, const Size & size)
 {
-	HOGDescriptor hog;
-	hog.winSize = size;
+	HOGDescriptor hog(size, cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, 1, -1.0, HOGDescriptor::L2Hys, 0.1, false, 64, false);
 	Mat gray;
 	vector< Point > location;
 	vector< float > descriptors;
@@ -307,6 +306,7 @@ void train_svm(const vector< Mat > & gradient_lst, const vector< int > & labels)
 	clog << "Start training...";
 	Ptr<SVM> svm = SVM::create();
 	/* Default values to train SVM */
+
 	svm->setCoef0(0.0);
 	svm->setDegree(3);
 	svm->setTermCriteria(TermCriteria(CV_TERMCRIT_ITER + CV_TERMCRIT_EPS, 1000, 1e-3));
@@ -314,8 +314,12 @@ void train_svm(const vector< Mat > & gradient_lst, const vector< int > & labels)
 	svm->setKernel(SVM::LINEAR);
 	svm->setNu(0.5);
 	svm->setP(0.1); // for EPSILON_SVR, epsilon in loss function?
-	svm->setC(0.01); // From paper, soft classifier
+	svm->setC(0.001); // From paper, soft classifier
 	svm->setType(SVM::EPS_SVR); // C_SVC; // EPSILON_SVR; // may be also NU_SVR; // do regression task
+	cv::Mat1d class_weights(1, 2);
+	class_weights(0) = 0.5;
+	class_weights(1) = 1.0;
+	svm->setClassWeights(class_weights);
 	svm->train(train_data, ROW_SAMPLE, Mat(labels));
 	clog << "...[done]" << endl;
 
@@ -330,7 +334,7 @@ void draw_locations(Mat & img, const vector< Rect > & locations, const Scalar & 
 		vector< Rect >::const_iterator end = locations.end();
 		for (; loc != end; ++loc)
 		{
-			rectangle(img, *loc, color, 2);
+			rectangle(img, *loc, color, 1);
 		}
 	}
 }
@@ -342,8 +346,7 @@ void test_it(const Size & size)
 	Scalar trained(0, 0, 255);
 	Mat img, draw;
 	Ptr<SVM> svm;
-	HOGDescriptor my_hog;
-	my_hog.winSize = size;
+	HOGDescriptor hog(size, cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, 1, -1.0, HOGDescriptor::L2Hys, 0.1, false, 64, false);
 	vector< Rect > locations;
 
 	// Load the trained SVM.
@@ -351,7 +354,7 @@ void test_it(const Size & size)
 	// Set the trained svm to my_hog
 	vector< float > hog_detector;
 	get_svm_detector(svm, hog_detector);
-	my_hog.setSVMDetector(hog_detector);
+	hog.setSVMDetector(hog_detector);
 
 	// Open the camera.
 	int test_img_num = 49;
@@ -359,42 +362,38 @@ void test_it(const Size & size)
 
 	std::ifstream fin("dataset/lv_keypointse16_test.txt");
 	for (int i = 0; i < test_img_num; i++) {
-		std::cout << i << " ";
 		std::string image_name;
+		double skip;
 		cv::Rect2d bbox;
 		fin >> image_name >> bbox.x >> bbox.y >> bbox.width >> bbox.height;
-		if (bbox.width > bbox.height) {
-			bbox.x -= (bbox.width - bbox.height) / 2;
-			bbox.height = bbox.width;
-		}
-		else {
-			bbox.x -= (bbox.height - bbox.width) / 2;
-			bbox.width = bbox.height;
-		}
-		bbox.x -= 0.15 * bbox.width;
-		bbox.y -= 0.15 * bbox.height;
-		bbox.width *= 1.3;
-		bbox.height *= 1.3;
+		for (int j = 0; j < landmark_num; j++) { fin >> skip >> skip; }
+		const double bbox_scale = 1.5;
+		
+		bbox.x -= bbox_scale * bbox.width;
+		bbox.y -= bbox_scale * bbox.height;
+		bbox.width +=  2. * bbox_scale*bbox.width;
+		bbox.height += 2. * bbox_scale*bbox.height;
+
 
 		Slice slice(image_name);
-		cv::Mat1d imaged = slice.image.clone();
+		bbox = bbox & cv::Rect2d({ 0., 0. }, slice.image.size());
+		cv::Mat1d imaged = slice.image(bbox).clone();
 
+		cv::resize(imaged, imaged, cv::Size(), slice.pixel_spacing[0], slice.pixel_spacing[1]);
 		draw = imaged.clone();
+		std::cout << i << " " << slice.pixel_spacing[0] << " " << slice.pixel_spacing[1] << std::endl;
 		cv::Mat1b image;
 		imaged.convertTo(image, image.type(), 255);
 		locations.clear();
-		my_hog.detectMultiScale(image, locations, -0.6, cv::Size(2,2), cv::Size(-10,-10), 1.3, 2);
+
+		hog.detectMultiScale(image, locations, -0.9, cv::Size(), cv::Size(), 1.05, 1.);// , -0.95, cv::Size(1, 1), cv::Size(0, 0), 1.2, 2.0);
 		cv::merge(std::vector<cv::Mat1d>(3, draw), draw);
+
 		draw_locations(draw, locations, trained);
 
 		imshow("Test", draw);
 		key = (char)waitKey(0);
-		cv::Mat1d landmarks(landmark_num, 2);
-		for (int j = 0; j < landmark_num; j++) {
-			fin >> landmarks(j, 0) >> landmarks(j, 1);
-		}
 		std::cout << (key == ' ' ? "bad" : "") << std::endl;
-
 	}
 	fin.close();
 }
@@ -420,7 +419,7 @@ int main(int argc, char** argv)
 	}
 
 	const Size sample_size(32, 32);
-	bool skip_train = true;
+	bool skip_train = std::stoi(argv[5]);
 	if (!skip_train) {
 		cout << "Loading pos." << endl;
 		load_images(pos_dir, pos, pos_lst);

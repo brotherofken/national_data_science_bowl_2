@@ -286,7 +286,13 @@ int main(int argc, char ** argv)
 		cv::Mat ch2_image = (ch2_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
 		cv::Mat ch4_image = (ch4_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
 
-		cv::Rect2d lv_rect = lv_detector.detect(cur_image, inter.p_sax, true);
+		cv::Mat detection_image = cur_image.clone();
+		cv::resize(detection_image, detection_image, cv::Size(), 1.5, 1.5, cv::INTER_CUBIC);
+		cv::Rect2d lv_rect = lv_detector.detect(detection_image, inter.p_sax * 1.5, true);
+		lv_rect.x /= 1.5;
+		lv_rect.y /= 1.5;
+		lv_rect.width /= 1.5;
+		lv_rect.height /= 1.5;
 		BoundingBox lv_bbox = { lv_rect.x, lv_rect.y, lv_rect.width, lv_rect.height, lv_rect.x + lv_rect.width / 2.0, lv_rect.y + lv_rect.height / 2.0 };
 		
 		cv::Mat1b cur_image1b;

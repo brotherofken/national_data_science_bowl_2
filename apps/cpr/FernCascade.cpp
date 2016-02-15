@@ -153,19 +153,34 @@ vector<Mat_<double> > FernCascade::Train(const vector<Mat_<uchar> >& images,
     return prediction;    
 }
 
-void FernCascade::Read(ifstream& fin){
-    fin>>second_level_num_; 
-    ferns_.resize(second_level_num_);
-    for(int i = 0;i < second_level_num_;i++){
-        ferns_[i].Read(fin);
-    }
+void FernCascade::Read(std::istream& fin) {
+#if defined(BINARY_IO)
+	io::read_scalar(fin, second_level_num_);
+	ferns_.resize(second_level_num_);
+	for (int i = 0; i < second_level_num_; i++) {
+		ferns_[i].Read(fin);
+	}
+#else
+	fin >> second_level_num_;
+	ferns_.resize(second_level_num_);
+	for (int i = 0; i < second_level_num_; i++) {
+		ferns_[i].Read(fin);
+	}
+#endif
 }
 
-void FernCascade::Write(ofstream& fout){
-    fout<<second_level_num_<<endl;
-    for(int i = 0;i < second_level_num_;i++){
-        ferns_[i].Write(fout);
-    }   
+void FernCascade::Write(std::ostream& fout) {
+#if defined(BINARY_IO)
+	io::write_scalar(fout, second_level_num_);
+	for (int i = 0; i < second_level_num_; i++) {
+		ferns_[i].Write(fout);
+	}
+#else
+	fout << second_level_num_ << std::endl;
+	for (int i = 0; i < second_level_num_; i++) {
+		ferns_[i].Write(fout);
+	}
+#endif
 }
 
 

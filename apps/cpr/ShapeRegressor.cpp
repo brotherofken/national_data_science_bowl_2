@@ -100,60 +100,105 @@ void ShapeRegressor::Train(const vector<Mat_<uchar> >& images,
 }
 
 
-void ShapeRegressor::Write(ofstream& fout){
-    fout<<first_level_num_<<endl;
-    fout<<mean_shape_.rows<<endl;
-    for(int i = 0;i < landmark_num_;i++){
-        fout<<mean_shape_(i,0)<<" "<<mean_shape_(i,1)<<" "; 
-    }
-    fout<<endl;
-    
-    fout<<training_shapes_.size()<<endl;
-    for(int i = 0;i < training_shapes_.size();i++){
-        fout<<bounding_box_[i].start_x<<" "<<bounding_box_[i].start_y<<" "
-            <<bounding_box_[i].width<<" "<<bounding_box_[i].height<<" "
-            <<bounding_box_[i].centroid_x<<" "<<bounding_box_[i].centroid_y<<endl;
-        for(int j = 0;j < training_shapes_[i].rows;j++){
-            fout<<training_shapes_[i](j,0)<<" "<<training_shapes_[i](j,1)<<" "; 
-        }
-        fout<<endl;
-    }
-    
-    for(int i = 0;i < first_level_num_;i++){
-        fern_cascades_[i].Write(fout);
-    } 
+void ShapeRegressor::Write(std::ostream& fout)
+{
+#if defined(BINARY_IO)
+	io::write_scalar(fout, first_level_num_);
+	io::write_scalar(fout, landmark_num_);
+
+	io::write_mat(fout, mean_shape_);
+
+	fout << training_shapes_.size();
+	io::write_vector(fout, bounding_box_);
+	for (int i = 0; i < training_shapes_.size(); i++) {
+		io::write_mat(fout, training_shapes_[i]);
+	}
+
+	for (int i = 0; i < first_level_num_; i++) {
+		fern_cascades_[i].Write(fout);
+	}
+#else
+	fout << first_level_num_ << std::endl;
+	fout << mean_shape_.rows << std::endl;
+	for (int i = 0; i < landmark_num_; i++) {
+		fout << mean_shape_(i, 0) << " " << mean_shape_(i, 1) << " ";
+	}
+	fout << std::endl;
+
+	fout << training_shapes_.size() << std::endl;
+	for (int i = 0; i < training_shapes_.size(); i++) {
+		fout << bounding_box_[i].start_x << " " << bounding_box_[i].start_y << " "
+			<< bounding_box_[i].width << " " << bounding_box_[i].height << " "
+			<< bounding_box_[i].centroid_x << " " << bounding_box_[i].centroid_y << std::endl;
+		for (int j = 0; j < training_shapes_[i].rows; j++) {
+			fout << training_shapes_[i](j, 0) << " " << training_shapes_[i](j, 1) << " ";
+		}
+		fout << std::endl;
+	}
+
+	for (int i = 0; i < first_level_num_; i++) {
+		fern_cascades_[i].Write(fout);
+	}
+#endif
 }
 
-void ShapeRegressor::Read(ifstream& fin){
-    fin>>first_level_num_;
-    fin>>landmark_num_;
-    mean_shape_ = Mat::zeros(landmark_num_,2,CV_64FC1);
-    for(int i = 0;i < landmark_num_;i++){
-        fin>>mean_shape_(i,0)>>mean_shape_(i,1);
-    }
-    
-    int training_num;
-    fin>>training_num;
-    training_shapes_.resize(training_num);
-    bounding_box_.resize(training_num);
+void ShapeRegressor::Read(std::istream& fin)
+{
+#if defined(BINARY_IO)
+	io::read_scalar(fin, first_level_num_);
+	io::read_scalar(fin, landmark_num_);
 
-    for(int i = 0;i < training_num;i++){
-        BoundingBox temp;
-        fin>>temp.start_x>>temp.start_y>>temp.width>>temp.height>>temp.centroid_x>>temp.centroid_y;
-        bounding_box_[i] = temp;
-        
-        Mat_<double> temp1(landmark_num_,2);
-        for(int j = 0;j < landmark_num_;j++){
-            fin>>temp1(j,0)>>temp1(j,1);
-        }
-        training_shapes_[i] = temp1; 
-    }
+	mean_shape_ = cv::Mat(landmark_num_, 2, CV_64FC1);
+	io::read_mat(fin, mean_shape_);
 
-    fern_cascades_.resize(first_level_num_);
-    for(int i = 0;i < first_level_num_;i++){
-        fern_cascades_[i].Read(fin);
-    }
-} 
+	int training_num;
+	fin >> training_num;
+	training_shapes_.resize(training_num);
+	bounding_box_.resize(training_num);
+
+	io::read_vector(fin, bounding_box_);
+	for (int i = 0; i < training_num; i++) {
+		cv::Mat1d temp1(landmark_num_, 2);
+
+		io::read_mat(fin, temp1);
+		training_shapes_[i] = temp1;
+	}
+
+	fern_cascades_.resize(first_level_num_);
+	for (int i = 0; i < first_level_num_; i++) {
+		fern_cascades_[i].Read(fin);
+	}
+#else
+	fin >> first_level_num_;
+	fin >> landmark_num_;
+	mean_shape_ = Mat::zeros(landmark_num_, 2, CV_64FC1);
+	for (int i = 0; i < landmark_num_; i++) {
+		fin >> mean_shape_(i, 0) >> mean_shape_(i, 1);
+	}
+
+	int training_num;
+	fin >> training_num;
+	training_shapes_.resize(training_num);
+	bounding_box_.resize(training_num);
+
+	for (int i = 0; i < training_num; i++) {
+		BoundingBox temp;
+		fin >> temp.start_x >> temp.start_y >> temp.width >> temp.height >> temp.centroid_x >> temp.centroid_y;
+		bounding_box_[i] = temp;
+
+		cv::Mat1d temp1(landmark_num_, 2);
+		for (int j = 0; j < landmark_num_; j++) {
+			fin >> temp1(j, 0) >> temp1(j, 1);
+		}
+		training_shapes_[i] = temp1;
+	}
+
+	fern_cascades_.resize(first_level_num_);
+	for (int i = 0; i < first_level_num_; i++) {
+		fern_cascades_[i].Read(fin);
+	}
+#endif
+}
 
 
 Mat_<double> ShapeRegressor::Predict(const Mat_<uchar>& image, const BoundingBox& bounding_box, int initial_num){

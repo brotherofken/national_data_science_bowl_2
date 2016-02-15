@@ -31,10 +31,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 int main() {
 	const int img_num = 500; // WHATTA
-	const int candidate_pixel_num = 100; // TOO MUCH
+	const int candidate_pixel_num = 200; // TOO MUCH
 	const int fern_pixel_num = 5;
-	const int first_level_num = 10; // cascades
-	const int second_level_num = 250; // trees per cascade
+	const int first_level_num = 15; // cascades
+	const int second_level_num = 300; // trees per cascade
 	const int landmark_num = 16;
 	const int initial_number = 40;
 	bool show_train = true;
@@ -53,6 +53,14 @@ int main() {
 		std::string image_name;
 		BoundingBox bbox;
 		fin >> image_name >> bbox.start_x >> bbox.start_y >> bbox.width >> bbox.height;
+
+		// Read image
+		Slice slice(image_name);
+		bbox.start_x *= slice.pixel_spacing[0];
+		bbox.start_x *= slice.pixel_spacing[1];
+		bbox.width *= slice.pixel_spacing[0];
+		bbox.height *= slice.pixel_spacing[1];
+
 		if (bbox.width > bbox.height) {
 			bbox.start_y -= (bbox.width - bbox.height) / 2;
 			bbox.height = bbox.width;
@@ -70,12 +78,13 @@ int main() {
 		cv::Mat1d landmarks(landmark_num, 2);
 		for (int j = 0; j < landmark_num; j++) {
 			fin >> landmarks(j, 0) >> landmarks(j, 1);
+			landmarks(j, 0) *= slice.pixel_spacing[0];
+			landmarks(j, 1) *= slice.pixel_spacing[1];
 		}
 		ground_truth_shapes.push_back(landmarks);
 
-		// Read image
-		Slice slice(image_name);
 		cv::Mat1d imaged = slice.image.clone();
+		cv::resize(imaged, imaged, cv::Size(), slice.pixel_spacing[0], slice.pixel_spacing[1], cv::INTER_CUBIC);
 
 		cv::Mat1b image;
 		imaged.convertTo(image, image.type(), 255);
