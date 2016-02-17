@@ -227,7 +227,7 @@ Mat_<double> ShapeRegressor::Predict(const Mat_<uchar>& image, const BoundingBox
 void ShapeRegressor::Load(string path){
     cout<<"Loading model..."<<endl;
     ifstream fin;
-    fin.open(path);
+    fin.open(path, ios::binary);
     this->Read(fin); 
     fin.close();
     cout<<"Model loaded successfully..."<<endl;
@@ -236,7 +236,7 @@ void ShapeRegressor::Load(string path){
 void ShapeRegressor::Save(string path){
     cout<<"Saving model..."<<endl;
     ofstream fout;
-    fout.open(path);
+    fout.open(path, ios::binary);
     this->Write(fout);
     fout.close();
 }

@@ -341,3 +341,102 @@ cv::RotatedRect fitEllipse(const std::vector<cv::Point>& _points, const std::vec
 
 	return box;
 }
+
+
+
+cv::RotatedRect fitEllipseToCenter(const std::vector<cv::Point>& _points, const std::vector<double>& weights, const cv::Point& center)
+{
+	using namespace cv;
+
+	Mat points = cv::Mat(_points);
+	int i, n = points.checkVector(2);
+	int depth = points.depth();
+	CV_Assert(n >= 0 && (depth == CV_32F || depth == CV_32S));
+
+	RotatedRect box;
+
+	if (n < 5)
+		CV_Error(CV_StsBadSize, "There should be at least 5 points to fit the ellipse");
+
+	// New fitellipse algorithm, contributed by Dr. Daniel Weiss
+	Point2f c(0, 0);
+	double gfp[5], rp[5], t;
+	const double min_eps = 1e-8;
+
+	const Point* ptsi = points.ptr<Point>();
+
+	AutoBuffer<double> _Ad(n * 5), _bd(n);
+	double *Ad = _Ad, *bd = _bd;
+
+
+	cv::Mat1d W = cv::Mat1d::eye(n, n);
+	for (size_t i{}; i < _points.size(); ++i) {
+		W(i, i) = weights[i];
+	}
+
+	for (i = 0; i < n; i++)
+	{
+		Point2f p = Point2f((float)ptsi[i].x, (float)ptsi[i].y);
+		p -= c;
+		bd[i] = 10000.0; // 1.0?
+		Ad[i * 5] = -(double)p.x * p.x; // A - C signs inverted as proposed by APP
+		Ad[i * 5 + 1] = -(double)p.y * p.y;
+		Ad[i * 5 + 2] = -(double)p.x * p.y;
+		Ad[i * 5 + 3] = p.x;
+		Ad[i * 5 + 4] = p.y;
+	}
+
+	// re-fit for parameters A - C with those center coordinates
+	rp[0] = center.x;
+	rp[1] = center.x;
+	Mat A = Mat(n, 3, CV_64F, Ad);
+	Mat b = Mat(n, 1, CV_64F, bd);
+	Mat x = Mat(3, 1, CV_64F, gfp);
+
+	double l = 10000.0;
+	cv::Mat1d Reg = cv::Mat1d::eye(A.cols, A.cols);
+
+	for (i = 0; i < n; i++)
+	{
+		Point2f p = Point2f((float)ptsi[i].x, (float)ptsi[i].y);
+		p -= c;
+		bd[i] = 1.0;
+		Ad[i * 3] = (p.x - rp[0]) * (p.x - rp[0]);
+		Ad[i * 3 + 1] = (p.y - rp[1]) * (p.y - rp[1]);
+		Ad[i * 3 + 2] = (p.x - rp[0]) * (p.y - rp[1]);
+	}
+	//solve(A, b, x, DECOMP_SVD);
+
+	Reg = cv::Mat1d::eye(A.cols, A.cols);
+	x = (A.t() * W * A + l * Reg).inv(DECOMP_SVD) * A.t() * W * b;
+
+	// store angle and radii
+	rp[4] = -0.5 * atan2(gfp[2], gfp[1] - gfp[0]); // convert from APP angle usage
+	if (fabs(gfp[2]) > min_eps)
+		t = gfp[2] / sin(-2.0 * rp[4]);
+	else // ellipse is rotated by an integer multiple of pi/2
+		t = gfp[1] - gfp[0];
+	rp[2] = fabs(gfp[0] + gfp[1] - t);
+	if (rp[2] > min_eps)
+		rp[2] = std::sqrt(2.0 / rp[2]);
+	rp[3] = fabs(gfp[0] + gfp[1] + t);
+	if (rp[3] > min_eps)
+		rp[3] = std::sqrt(2.0 / rp[3]);
+
+	box.center.x = (float)rp[0] + c.x;
+	box.center.y = (float)rp[1] + c.y;
+	box.size.width = (float)(rp[2] * 2);
+	box.size.height = (float)(rp[3] * 2);
+	if (box.size.width > box.size.height)
+	{
+		float tmp;
+		CV_SWAP(box.size.width, box.size.height, tmp);
+		box.angle = (float)(90 + rp[4] * 180 / CV_PI);
+	}
+	if (box.angle < -180)
+		box.angle += 360;
+	if (box.angle > 360)
+		box.angle -= 360;
+
+	return box;
+}

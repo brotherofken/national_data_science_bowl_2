@@ -45,7 +45,7 @@ int main(){
 
 	std::ifstream fin("dataset/lv_keypointse16_test.txt");
 
-	HogLvDetector lv_detector;
+	//HogLvDetector lv_detector;
 
 	bool show_train = true;
 
@@ -87,16 +87,24 @@ int main(){
 		cv::Scalar mean_point_tmp = cv::mean(landmarks.reshape(2, landmark_num / 2));
 		cv::Point mean_point(mean_point_tmp[0], mean_point_tmp[1]);
 
-		cv::Rect2d lv_rect = lv_detector.detect(imaged, mean_point, true);
-		BoundingBox lv_bbox = { lv_rect.x, lv_rect.y, lv_rect.width, lv_rect.height, lv_rect.x + lv_rect.width / 2.0, lv_rect.y + lv_rect.height / 2.0 };
-		bbox = lv_rect.area() > 0 ? lv_bbox : bbox;
+		//cv::Rect2d lv_rect = lv_detector.detect(imaged, mean_point, true);
+		//BoundingBox lv_bbox = { lv_rect.x, lv_rect.y, lv_rect.width, lv_rect.height, lv_rect.x + lv_rect.width / 2.0, lv_rect.y + lv_rect.height / 2.0 };
+		//bbox = lv_rect.area() > 0 ? lv_bbox : bbox;
+
+		const int max_dim = std::min(image.cols * slice.pixel_spacing[0], image.rows * slice.pixel_spacing[1]);
+		bbox.start_x = mean_point.x - 0.05 * max_dim;
+		bbox.start_y = mean_point.y - 0.05 * max_dim;
+		bbox.width = 0.1 * max_dim;
+		bbox.height = 0.1 * max_dim;
+		bbox.centroid_x = bbox.start_x + bbox.width / 2.0;
+		bbox.centroid_y = bbox.start_y + bbox.height / 2.0;
 
 		bounding_box.push_back(bbox);
 
 		if (show_train) {
 			cv::Mat test_image_1 = images.back().clone();
 			cv::cvtColor(test_image_1, test_image_1, CV_GRAY2BGR);
-			double scale = 512. / test_image_1.cols;
+			double scale = 1;//256. / std::max(test_image_1.cols, test_image_1.rows);
 			cv::resize(test_image_1, test_image_1, cv::Size(), scale, scale);
 
 			cv::putText(test_image_1, image_name, cv::Point(15, 15), CV_FONT_HERSHEY_COMPLEX, 0.4, cv::Scalar(255, 255, 255));
@@ -114,7 +122,7 @@ int main(){
 	fin.close();
 
     ShapeRegressor regressor;
-    regressor.Load("cpr_model_hog_detections.txt");
+    regressor.Load("cpr_model_circled.txt");
 	int index = 0;
 	int key = 0;
     while (key != 'q') {
@@ -124,7 +132,7 @@ int main(){
 		cv::cvtColor(test_image_1, test_image_1, CV_GRAY2BGR);
 		cv::Mat1d gt_shape = ground_truth_shapes[index];
 
-		double scale = 1024. / test_image_1.cols;
+		double scale = 512. / test_image_1.cols;
 		cv::resize(test_image_1, test_image_1, cv::Size(), scale, scale);
 		cv::putText(test_image_1, std::to_string(index) + "/" + std::to_string(images.size()) + " " + names[index], cv::Point(15, 15), CV_FONT_HERSHEY_COMPLEX, 0.4, Scalar(255, 255, 0));
 

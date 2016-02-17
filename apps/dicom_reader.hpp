@@ -41,6 +41,7 @@ struct Slice : public OrientedObject
 	std::string filename; // relative path to image
 	size_t frame_number;
 	cv::Mat1d image;
+	cv::Point estimated_center;
 
 	std::map<std::string, cv::Mat> aux;
 
@@ -86,7 +87,7 @@ struct PatientData
 		using Vector = std::vector<Intersection>;
 	};
 
-	PatientData(const std::string& directory);
+	PatientData(const std::string& data_path, const std::string& directory);
 
 	std::pair<double, double> get_min_max_bp_level() const;
 

@@ -172,3 +172,4 @@ struct ChanVeseArgs
 cv::Mat1d segmentation_chan_vese(const cv::Mat1d& img, const cv::Mat1d& init, const ChanVeseArgs& args);
 
 cv::RotatedRect fitEllipse(const std::vector<cv::Point>& _points, const std::vector<double>& weights);
+cv::RotatedRect fitEllipseToCenter(const std::vector<cv::Point>& _points, const std::vector<double>& weights, const cv::Point& center);

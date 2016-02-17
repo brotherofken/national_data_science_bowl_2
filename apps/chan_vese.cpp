@@ -195,6 +195,7 @@ int main(int argc, char ** argv)
 	struct ChanVeseArgs cv_args;
 
 	std::string input_patient;
+	std::string data_path;
 
 	bool object_selection = false;
 	bool segment = false;
@@ -209,6 +210,7 @@ int main(int argc, char ** argv)
 		desc.add_options()
 			("help,h", "this message")
 			("input,i", po::value<std::string>(&input_patient), "patient directory")
+			("data,d", po::value<std::string>(&data_path), "data directory")
 			("mu", po::value<double>(&cv_args.mu)->default_value(0.5), "length penalty parameter (must be positive or zero)")
 			("nu", po::value<double>(&cv_args.nu)->default_value(0), "area penalty parameter")
 			("dt", po::value<double>(&cv_args.dt)->default_value(1), "timestep")
@@ -232,7 +234,7 @@ int main(int argc, char ** argv)
 			return EXIT_SUCCESS;
 		}
 		if (!vm.count("input")) msg_exit("Error: you have to specify input file name!");
-		if (vm.count("input") && !boost::filesystem::exists(input_patient)) msg_exit("Error: file \"" + input_patient + "\" does not exists!");
+		if (vm.count("input") && !boost::filesystem::exists(data_path+"/"+input_patient)) msg_exit("Error: file \"" + input_patient + "\" does not exists!");
 		if (vm.count("dt") && cv_args.dt <= 0) msg_exit("Cannot have negative or zero timestep: " + std::to_string(cv_args.dt) + ".");
 		if (vm.count("mu") && cv_args.mu < 0) msg_exit("Length penalty parameter cannot be negative: " + std::to_string(cv_args.mu) + ".");
 		if (vm.count("lambda1") && cv_args.lambda1 < 0) msg_exit("Any value of lambda1 cannot be negative.");
@@ -246,7 +248,7 @@ int main(int argc, char ** argv)
 		msg_exit("error: " + std::string(e.what()));
 	}
 
-	PatientData patient_data(input_patient);
+	PatientData patient_data(data_path, input_patient);
 
 	auto& sax = patient_data.sax_seqs[8];
 
@@ -339,13 +341,75 @@ int main(int argc, char ** argv)
 			const double val_ch2 = cv::mean(ch2_image(cv::Rect(inter.p_ch2 - cv::Point2d{ 1,1 }, inter.p_ch2 + cv::Point2d{ 1,1 })))[0];
 			const double val_ch4 = cv::mean(ch4_image(cv::Rect(inter.p_ch4 - cv::Point2d{ 1,1 }, inter.p_ch4 + cv::Point2d{ 1,1 })))[0];
 
+
 			cur_image.convertTo(cur_image, CV_32FC1);
 			ch2_image.convertTo(ch2_image, CV_32FC1);
 			ch4_image.convertTo(ch4_image, CV_32FC1);
-
 			cv::cvtColor(cur_image, cur_image, cv::COLOR_GRAY2BGR);
 			cv::cvtColor(ch2_image, ch2_image, cv::COLOR_GRAY2BGR);
 			cv::cvtColor(ch4_image, ch4_image, cv::COLOR_GRAY2BGR);
+
+			if (true) {
+				cv::Point img_point = cur_slice.estimated_center;// cur_slice.point_to_image(inter.p);
+				const double width = 0.2 * cur_image.cols;
+				cv::Rect roi(img_point - cv::Point(width, width), img_point + cv::Point(width, width));
+
+				cv::Mat1f img = cv::Mat1f(cur_slice.image.clone());
+				cv::Mat1f img_roi = img(roi);
+
+				{
+					const size_t dilate_width = 10./256.*cur_slice.image.cols;
+					//cv::dilate(img_roi, img_roi, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(dilate_width, dilate_width)));
+					//cv::erode(img_roi, img_roi, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(dilate_width, dilate_width)));
+					cv::Mat1b tmp;
+					img_roi.convertTo(tmp, CV_8UC1, 255);
+					cv::medianBlur(tmp, tmp, 7);
+					tmp.convertTo(img_roi, CV_32FC1, 1./255);
+				}
+				cv::Mat1f kernel = cv::getGaussianKernel(roi.width, 0.3*((roi.width - 1)*0.5 - 1) + 0.8, CV_32FC1);
+				kernel /= kernel(roi.width / 2);
+				kernel = kernel * kernel.t();
+				cv::Mat1f dx, dy, magnitude;
+				cv::Sobel(img_roi, dx, CV_32FC1, 1, 0);
+				cv::Sobel(img_roi, dy, CV_32FC1, 0, 1);
+				cv::magnitude(dx, dy, magnitude);
+
+				cv::Mat1f weighed_magnitude = magnitude.mul(kernel);
+				double wmmax;
+				cv::minMaxLoc(weighed_magnitude, nullptr, &wmmax);
+				weighed_magnitude /= wmmax;
+
+				cv::Point2d mean_point = cur_slice.estimated_center - roi.tl();// .cols / 2, img_roi.rows / 2);
+				double R = 0;
+				for (size_t x{}; x < weighed_magnitude.cols; ++x) {
+					for (size_t y{}; y < weighed_magnitude.rows; ++y) {
+						if (weighed_magnitude(y, x) > 0.5) {
+							R += cv::norm(mean_point - cv::Point2d(x, y));
+						}
+					}
+				}
+				R /= cv::countNonZero(weighed_magnitude > 0.5);
+
+				std::vector<cv::Point> points;
+				std::vector<double> weights;
+				for (size_t i = 0; i < weighed_magnitude.rows; i++) {
+					for (size_t j = 0; j < weighed_magnitude.cols; j++) {
+						if (i % 2 && j % 2 && weighed_magnitude(cv::Point(j, i)) > 0.3) {
+							points.push_back(cv::Point(j, i));
+							weights.push_back(weighed_magnitude(cv::Point(j, i))*wmmax);
+						}
+					}
+				}
+
+				cv::RotatedRect rect = ::fitEllipseToCenter(points, weights, mean_point);
+				rect.center += cv::Point2f(roi.tl());// + cv::Point2f(mean_point);
+
+				cv::circle(cur_image, cur_slice.estimated_center, 2, cv::Scalar(1., 0., 1.));
+				cv::ellipse(cur_image, rect, cv::Scalar(1., 0., 1.));
+				//cv::circle(cur_image, roi.tl() + cv::Point2i(mean_point), R, cv::Scalar(1., 1., 0.));
+				cv::imshow("ROI magnitude", weighed_magnitude);
+
+			}
 
 			const auto draw_line = [] (cv::Mat& image, const Slice& slice, const line_eq_t& line, cv::Scalar color) {
 				const cv::Point2d p1 = slice.point_to_image(line(-1000));
@@ -380,6 +444,7 @@ int main(int argc, char ** argv)
 			cv::imshow("ch4", ch4_image);
 			cv::imshow("slic_result", slic_result);
 			cv::setMouseCallback("slic_result", on_mouse, &slic);
+			cv::imwrite("tmp/slice_" + std::to_string(sax_id) + "_frame_" + std::to_string(slice_id) + ".png", 255 * cur_image);
 		}
 		key = cv::waitKey();
 	}

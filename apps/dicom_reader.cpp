@@ -219,9 +219,9 @@ Sequence::Sequence(const std::string& directory)
 	}
 }
 
-PatientData::PatientData(const std::string& directory_)
+PatientData::PatientData(const std::string& data_path, const std::string& directory_)
 {
-	directory = directory_;
+	directory = data_path + "/" + directory_;
 	std::clog << "Reading patient " << directory << std::endl;
 	number = std::stoul(fs::path(directory).stem().string());
 
@@ -237,6 +237,25 @@ PatientData::PatientData(const std::string& directory_)
 			if (s.type == Sequence::Type::sax) sax_seqs.push_back(s);
 			if (s.type == Sequence::Type::ch2) ch2_seq = s;
 			if (s.type == Sequence::Type::ch4) ch4_seq = s;
+		}
+	}
+
+	{
+		std::string estimated_centers_filename = data_path + "/lvs/NDSB_" + std::to_string(number) + ".csv";
+		std::ifstream fin(estimated_centers_filename);
+		std::map<std::string, cv::Point> points;
+		std::string filename;
+		int x, y;
+		while (fin >> filename >> x >> y) {
+			std::string basename = boost::filesystem::basename(boost::filesystem::path(filename));
+			points[basename] = cv::Point(x, y);
+		}
+
+		for (Sequence& sax : sax_seqs) {
+			for (Slice& s : sax.slices) {
+				std::string basename = boost::filesystem::basename(boost::filesystem::path(s.filename));
+				s.estimated_center = points.count(basename) ? points[basename] : cv::Point(-1, -1);
+			}
 		}
 	}
 
