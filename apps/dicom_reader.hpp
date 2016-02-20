@@ -22,14 +22,15 @@ struct OrientedObject
 
 	cv::Point2d point_to_image(const cv::Vec3d& p) const
 	{
-		const cv::Mat1d projection = rotation_matrix().inv().t() * cv::Mat1d(p - position);
+		const cv::Mat1d projection = rotation_matrix().inv() * cv::Mat1d(p - position);
 		return{ projection(0, 0), projection(1,0) };
 	}
 
 	cv::Vec3d point_to_3d(const cv::Point2d& p) const
 	{
-		const cv::Vec3d p3da{ p.x, p.y, 0. };
-		const cv::Mat1d projection = rotation_matrix() * cv::Mat1d(p3da) + position;
+		const cv::Vec3d p3da{ p.x, p.y, 0.0};
+		cv::Mat1d projection = rotation_matrix() * cv::Mat1d(p3da);
+		projection = projection + cv::Mat1d(position);
 		return cv::Vec3d(projection);
 	}
 };

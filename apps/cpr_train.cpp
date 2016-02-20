@@ -27,15 +27,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <boost/filesystem.hpp>
 
+#include <opencv2/photo.hpp>
+
 #include "cpr/FaceAlignment.h"
 #include "hog_lv_detector.hpp"
 #include "dicom_reader.hpp"
 #include "contour_extraction.hpp"
 
 namespace bfs = boost::filesystem;
-
-
-
 
 cv::RotatedRect get_ellipse_for_point(const cv::Mat1f& img, const cv::Point& estimated_center)
 {
@@ -260,6 +259,7 @@ int main() {
 			bbox.centroid_y = bbox.start_y + bbox.height / 2.0;
 
 			ground_truth_shapes.push_back(landmarks);
+
 			images.push_back(image);
 			bounding_box.push_back(bbox);
 
@@ -295,7 +295,7 @@ int main() {
 
 	ShapeRegressor regressor;
 	regressor.Train(images, ground_truth_shapes, bounding_box, first_level_num, second_level_num, candidate_pixel_num, fern_pixel_num, initial_number);
-	regressor.Save("cpr_model_circled.txt");
+	regressor.Save("cpr_model_circled_kmeans_smooth.txt");
 
 	return 0;
 }

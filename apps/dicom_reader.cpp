@@ -174,10 +174,11 @@ Slice::Slice(const std::string& filename)
 		pixel_spacing = cv::Vec3d(gimage.GetSpacing());
 		// Rotation matrix
 		rm = cv::Mat1d(0, 3);
-		rm.push_back(row_dc * pixel_spacing[0]);
-		rm.push_back(col_dc * pixel_spacing[1]);
-		rm.push_back(normal() * pixel_spacing[0]);
+		rm.push_back(row_dc*pixel_spacing[0]);
+		rm.push_back(col_dc*pixel_spacing[1]);
+		rm.push_back(row_dc.cross(col_dc)*pixel_spacing[0]);
 		rm = rm.reshape(1, 3);
+		rm = rm.t();
 	}
 	{
 		gdcm::Reader reader;

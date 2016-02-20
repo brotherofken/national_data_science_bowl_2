@@ -223,7 +223,7 @@ int main(){
 	fin.close();
 
     ShapeRegressor regressor;
-    regressor.Load("cpr_model_circled.txt");
+    regressor.Load("cpr_model_circled_kmeans_smooth.txt");
 	int index = 0;
 	int key = 0;
     while (key != 'q') {

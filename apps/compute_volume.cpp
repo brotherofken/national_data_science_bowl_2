@@ -31,7 +31,6 @@
 
 cv::Mat1i gmm_segmentaiton(const cv::Mat1f& img_roi)
 {
-
 	cv::Mat tmp;
 	img_roi.convertTo(tmp, CV_8UC1, 255);
 	cv::medianBlur(tmp, tmp, 7);
@@ -328,7 +327,53 @@ int main(int argc, char ** argv)
 	//HogLvDetector lv_detector;
 
 	ShapeRegressor regressor;
-	regressor.Load("cpr_model_circled.txt");
+	regressor.Load("cpr_model_circled_kmeans_smooth.txt");
+
+	if (true) {
+		std::vector<std::vector<cv::Vec3d>> points3d(patient_data.sax_seqs[0].slices.size());
+		std::cout << "Computing landmarks locations.. " << std::endl;
+		for (Sequence& seq : patient_data.sax_seqs) {
+			for (Slice& cur_slice : seq.slices) {
+				std::cout << " " << seq.name << "/" << cur_slice.frame_number << "\t\t\t\r";
+				cv::Mat cur_image = (cur_slice.image.clone());
+				//cv::resize(cur_image, cur_image, cv::Size(), cur_slice.pixel_spacing[0], cur_slice.pixel_spacing[1], cv::INTER_CUBIC);
+
+				cv::Mat1f imagef;
+				cur_image.convertTo(imagef, imagef.type());
+				double R = get_circle_for_point(imagef, cur_slice.estimated_center);
+
+				BoundingBox lv_bbox;
+				lv_bbox.start_x = cur_slice.estimated_center.x - R * 1.1;
+				lv_bbox.start_y = cur_slice.estimated_center.y - R * 1.1;
+				lv_bbox.width = 2 * R * 1.1;
+				lv_bbox.height = 2 * R * 1.1;
+				lv_bbox.centroid_x = lv_bbox.start_x + lv_bbox.width / 2.0;
+				lv_bbox.centroid_y = lv_bbox.start_y + lv_bbox.height / 2.0;
+
+				cv::Mat1b cur_image1b;
+				cur_image.convertTo(cur_image1b, cur_image1b.type(), 255);
+				cv::Mat1d current_shape = lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, 15) : cv::Mat1d::zeros(1, landmark_num);
+
+				cur_slice.aux["landmarks"] = current_shape;
+				
+			}
+		}
+		std::cout << std::endl;
+
+		std::string lms_savepath = data_path + "/" + input_patient + "/landmarks.pts";
+		std::ofstream fout(lms_savepath);
+		for (Sequence& seq : patient_data.sax_seqs) {
+			for (Slice& cur_slice : seq.slices) {
+				cv::Mat1d shape = cur_slice.aux["landmarks"];
+				for (size_t i{}; i < shape.rows; ++i) {
+					cv::Point2d point2d{ shape(i, 0), shape(i, 1) };
+					const cv::Vec3d point3d = cur_slice.point_to_3d(point2d);
+					fout << seq.name << "\t" << cur_slice.frame_number << "\t" << point3d[0] << "\t" << point3d[1] << "\t" << point3d[2] << std::endl;
+				}
+			}
+		}
+		
+	}
 
 	while (key != 'q') {
 		const int prev_sax_id = sax_id;
@@ -375,21 +420,9 @@ int main(int argc, char ** argv)
 		cv::Mat ch2_image = (ch2_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
 		cv::Mat ch4_image = (ch4_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
 
-		cv::Mat detection_image = cur_image.clone();
-		cv::resize(detection_image, detection_image, cv::Size(), 1.5, 1.5, cv::INTER_CUBIC);
-		
 		cv::Mat1f imagef;
 		cur_image.convertTo(imagef, imagef.type());
 		double R = get_circle_for_point(imagef, cur_slice.estimated_center);
-
-		
-		//if (lv_rect.size.width > 2.5 * lv_rect.size.height) {
-		//	lv_rect.size.width = 1.5 * lv_rect.size.height;
-		//}
-		//else if (lv_rect.size.height > 2.5 * lv_rect.size.width) {
-		//	lv_rect.size.height = 1.5 * lv_rect.size.width;
-		//}
-		//cv::Rect lv_brect(lv_rect.center - cv::Point2f(lv_rect.size.width, lv_rect.size.height) / 2, lv_rect.size);// = lv_rect.boundingRect();
 
 		BoundingBox lv_bbox;
 		lv_bbox.start_x = cur_slice.estimated_center.x - R * 1.1;
@@ -399,16 +432,9 @@ int main(int argc, char ** argv)
 		lv_bbox.centroid_x = lv_bbox.start_x + lv_bbox.width / 2.0;
 		lv_bbox.centroid_y = lv_bbox.start_y + lv_bbox.height / 2.0;
 
-		//cv::Rect2d lv_rect = lv_detector.detect(detection_image, inter.p_sax * 1.5, true);
-		//lv_rect.x /= 1.5;
-		//lv_rect.y /= 1.5;
-		//lv_rect.width /= 1.5;
-		//lv_rect.height /= 1.5;
-		//BoundingBox lv_bbox = { lv_rect.x, lv_rect.y, lv_rect.width, lv_rect.height, lv_rect.x + lv_rect.width / 2.0, lv_rect.y + lv_rect.height / 2.0 };
-		
 		cv::Mat1b cur_image1b;
-		cur_image.convertTo(cur_image1b, cur_image1b.type(), 255);
-		cv::Mat1d current_shape = lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, 1) : cv::Mat1d::zeros(1, landmark_num);
+		imagef.convertTo(cur_image1b, cur_image1b.type(), 255);
+		cv::Mat1d current_shape = lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, 15) : cv::Mat1d::zeros(1, landmark_num);
 
 		double roi_sz = 0.2 * cur_slice.image.cols;
 		cv::Rect roi(inter.p_sax - cv::Point2d{ roi_sz, roi_sz }, inter.p_sax + cv::Point2d{ roi_sz, roi_sz });
@@ -453,8 +479,11 @@ int main(int argc, char ** argv)
 
 			const std::string navigtaion_text = std::to_string(sax_id+1) + "/" + std::to_string(patient_data.sax_seqs.size()) + "   " + std::to_string(slice_id+1)+"/" + std::to_string(sequence_len);
 			cv::putText(cur_image, navigtaion_text, cv::Point(10, 15), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
-
 			cv::putText(cur_image, std::to_string(val_sax), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
+			
+			const std::string slice_info = std::to_string(cur_slice.pixel_spacing[0]) + " " + std::to_string(cur_slice.pixel_spacing[0]);
+			cv::putText(cur_image, slice_info, cv::Point(10, 45), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
+
 			cv::putText(ch2_image, std::to_string(val_ch2), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
 			cv::putText(ch4_image, std::to_string(val_ch4), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
 
