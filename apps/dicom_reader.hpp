@@ -44,6 +44,7 @@ struct Slice : public OrientedObject
 	cv::Point estimated_center;
 
 	std::map<std::string, cv::Mat> aux;
+	size_t patient_id;
 
 	using Vector = std::vector<Slice>;
 };
@@ -105,3 +106,5 @@ struct PatientData
 line_eq_t slices_intersection(const OrientedObject& s1, const OrientedObject& s2);
 cv::Vec3d slices_intersection(const OrientedObject& s1, const OrientedObject& s2, const OrientedObject& s3);
 
+
+std::map<std::string, cv::Point> read_estimated_points(const std::string& path);

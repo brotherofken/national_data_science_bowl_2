@@ -209,7 +209,7 @@ cv::Mat separate(const cv::Mat & img, const cv::Mat & u, bool invert /*= false*/
 
 	selection = cv::Mat::zeros(h, w, img.type());// cv::Scalar(255, 255, 255));
 	img.copyTo(selection, mask);
-	return selection;
+	return selection; 
 }
 
 cv::RotatedRect fitEllipse(const std::vector<cv::Point>& _points, const std::vector<double>& weights)

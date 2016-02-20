@@ -17,6 +17,21 @@ const std::string PatientData::AUX_CONTOUR = "lv_annotation";
 
 namespace fs = ::boost::filesystem;
 
+std::map<std::string, cv::Point> read_estimated_points(const std::string& path)
+{
+	std::ifstream fin(path);
+	std::map<std::string, cv::Point> points;
+	std::string filename;
+	int x, y;
+
+	while (fin >> filename >> x >> y) {
+		std::string basename = fs::basename(fs::path(filename));
+		points[basename] = cv::Point(x, y);
+	}
+	return points;
+}
+
+
 namespace {
 	// return the filenames of all files that have the specified extension
 	// in the specified directory and all subdirectories
@@ -106,10 +121,22 @@ size_t get_frame_number(const std::string& dcm_filename)
 	}
 }
 
+size_t get_patient_id(const std::string& dcm_filename)
+{
+	const std::vector<std::string> strs = string_split(fs::path(dcm_filename).string(), "/\\");
+	auto it = std::find(strs.begin(), strs.end(), "study");
+	try {
+		return std::stoi(*(it - 1));
+	} catch (...) {
+		return -1;
+	}
+}
+
 // Bad style, no time for refactoring
 Slice::Slice(const std::string& filename)
 	: filename(filename)
 	, frame_number(get_frame_number(filename))
+	, patient_id(get_patient_id(filename))
 {
 	{
 		// Read to image
@@ -240,22 +267,13 @@ PatientData::PatientData(const std::string& data_path, const std::string& direct
 		}
 	}
 
-	{
-		std::string estimated_centers_filename = data_path + "/lvs/NDSB_" + std::to_string(number) + ".csv";
-		std::ifstream fin(estimated_centers_filename);
-		std::map<std::string, cv::Point> points;
-		std::string filename;
-		int x, y;
-		while (fin >> filename >> x >> y) {
-			std::string basename = boost::filesystem::basename(boost::filesystem::path(filename));
-			points[basename] = cv::Point(x, y);
-		}
+	std::string estimated_centers_filename = data_path + "/lvs/NDSB_" + std::to_string(number) + ".csv";
+	std::map<std::string, cv::Point> points = read_estimated_points(estimated_centers_filename);
 
-		for (Sequence& sax : sax_seqs) {
-			for (Slice& s : sax.slices) {
-				std::string basename = boost::filesystem::basename(boost::filesystem::path(s.filename));
-				s.estimated_center = points.count(basename) ? points[basename] : cv::Point(-1, -1);
-			}
+	for (Sequence& sax : sax_seqs) {
+		for (Slice& s : sax.slices) {
+			std::string basename = boost::filesystem::basename(boost::filesystem::path(s.filename));
+			s.estimated_center = points.count(basename) ? points[basename] : cv::Point(-1, -1);
 		}
 	}
 

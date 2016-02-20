@@ -60,12 +60,14 @@ vector<Mat_<double> > FernCascade::Train(const vector<Mat_<uchar> >& images,
     
     // get candidate pixel locations, please refer to 'shape-indexed features'
     for(int i = 0;i < candidate_pixel_num;i++){
-        double x = random_generator.uniform(-1.0,1.0);
-        double y = random_generator.uniform(-1.0,1.0);
-        if(x*x + y*y > 1.0){
-            i--;
-            continue;
-        }
+        double x = random_generator.uniform(-1.2,1.2);
+        double y = random_generator.uniform(-1.2,1.2);
+
+		//if(x*x + y*y > 1.0){
+        //    i--;
+        //    continue;
+        //}
+
         // find nearest landmark index
         double min_dist = 1e10;
         int min_index = 0;

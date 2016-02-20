@@ -29,6 +29,93 @@
 #include "hog_lv_detector.hpp"
 #include "dicom_reader.hpp"
 
+cv::Mat1i gmm_segmentaiton(const cv::Mat1f& img_roi)
+{
+
+	cv::Mat tmp;
+	img_roi.convertTo(tmp, CV_8UC1, 255);
+	cv::medianBlur(tmp, tmp, 7);
+	tmp.convertTo(tmp, CV_32FC1, 1. / 255);
+
+
+	cv::Mat1f samples(0, 1);
+	for (size_t i = 0; i < img_roi.rows; i++) {
+		for (size_t j = 0; j < img_roi.cols; j++) {
+			samples.push_back(tmp.at<float>(i, j));
+		}
+	}
+
+#if 0
+	cv::Ptr<cv::ml::EM> gmm = cv::ml::EM::create();
+	gmm->setClustersNumber(3);
+	gmm->setCovarianceMatrixType(cv::ml::EM::COV_MAT_SPHERICAL);
+	gmm->setTermCriteria(cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 300, 0.1));
+
+	cv::Mat labels;
+	gmm->trainEM(samples, cv::noArray(), labels, cv::noArray());
+#else
+	cv::Mat labels;
+	cv::kmeans(samples, 3, labels, cv::TermCriteria(), 3, cv::KMEANS_PP_CENTERS);
+#endif
+
+	labels = labels.reshape(1, img_roi.rows);
+	cv::imshow("segmentation", labels * 128 * 255);
+	return labels;
+}
+
+double get_circle_for_point(const cv::Mat1f& img, const cv::Point& estimated_center)
+{
+	// = cur_slice.estimated_center;// cur_slice.point_to_image(inter.p);
+	const double width = 0.2 * img.cols;
+	cv::Rect roi(estimated_center - cv::Point(width, width), estimated_center + cv::Point(width, width));
+	cv::Mat1f img_roi = img.clone();
+	img_roi = img_roi(roi);
+
+	cv::Mat1i labels = gmm_segmentaiton(img_roi);
+	cv::Mat1b segments = labels == labels(estimated_center - roi.tl());
+
+	using contours_t = std::vector<std::vector<cv::Point>>;
+	contours_t contours;
+	findContours(segments.clone(), contours, {}, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE);
+
+	contours = { *std::find_if(contours.begin(), contours.end(), [&](std::vector<cv::Point>& c) {
+		return cv::pointPolygonTest(c, estimated_center - roi.tl(), false) >= 0;
+	}) };
+	segments.setTo(0);
+	{
+		std::vector<cv::Point> tmp;
+		cv::convexHull(contours[0], tmp, true, true);
+		contours[0] = tmp;
+	}
+	cv::drawContours(segments, contours, 0, cv::Scalar::all(255), 1);
+	cv::imshow("gmm segmentation", segments);
+
+	cv::Mat1f kernel = cv::getGaussianKernel(roi.width, 0.3*((roi.width - 1)*0.5 - 1) + 0.8, CV_32FC1);
+	kernel /= kernel(roi.width / 2);
+	kernel = kernel * kernel.t();
+	cv::Mat1f magnitude;
+	segments.convertTo(magnitude, CV_32FC1, 1 / 255.);
+	cv::Mat1f weighed_magnitude = magnitude.mul(kernel);
+
+	double wmmax;
+	cv::minMaxLoc(weighed_magnitude, nullptr, &wmmax);
+	weighed_magnitude /= wmmax;
+	//kernel.setTo(wmmax, kernel > 0.6 * wmmax);
+
+	cv::Point2d mean_point = estimated_center - roi.tl();// .cols / 2, img_roi.rows / 2);
+	double R = 0;
+	for (size_t x{}; x < weighed_magnitude.cols; ++x) {
+		for (size_t y{}; y < weighed_magnitude.rows; ++y) {
+			if (weighed_magnitude(y, x) > 0.5) {
+				R += cv::norm(mean_point - cv::Point2d(x, y));
+			}
+		}
+	}
+	R /= cv::countNonZero(weighed_magnitude > 0.5);
+
+	return R;
+}
+
 /// Adds suffix to the file name
 std::string add_suffix(const std::string & path, const std::string & suffix, const std::string & delim = "_")
 {
@@ -166,6 +253,7 @@ int main(int argc, char ** argv)
 	struct ChanVeseArgs cv_args;
 
 	std::string input_patient;
+	std::string data_path;
 
 	bool object_selection = false;
 	bool segment = false;
@@ -180,6 +268,7 @@ int main(int argc, char ** argv)
 		desc.add_options()
 			("help,h", "this message")
 			("input,i", po::value<std::string>(&input_patient), "patient directory")
+			("data,d", po::value<std::string>(&data_path), "data directory")
 			("mu", po::value<double>(&cv_args.mu)->default_value(0.5), "length penalty parameter (must be positive or zero)")
 			("nu", po::value<double>(&cv_args.nu)->default_value(0), "area penalty parameter")
 			("dt", po::value<double>(&cv_args.dt)->default_value(1), "timestep")
@@ -203,7 +292,7 @@ int main(int argc, char ** argv)
 			return EXIT_SUCCESS;
 		}
 		if (!vm.count("input")) msg_exit("Error: you have to specify input file name!");
-		if (vm.count("input") && !boost::filesystem::exists(input_patient)) msg_exit("Error: file \"" + input_patient + "\" does not exists!");
+		if (vm.count("input") && !boost::filesystem::exists(data_path + "/" + input_patient)) msg_exit("Error: file \"" + input_patient + "\" does not exists!");
 		if (vm.count("dt") && cv_args.dt <= 0) msg_exit("Cannot have negative or zero timestep: " + std::to_string(cv_args.dt) + ".");
 		if (vm.count("mu") && cv_args.mu < 0) msg_exit("Length penalty parameter cannot be negative: " + std::to_string(cv_args.mu) + ".");
 		if (vm.count("lambda1") && cv_args.lambda1 < 0) msg_exit("Any value of lambda1 cannot be negative.");
@@ -217,7 +306,7 @@ int main(int argc, char ** argv)
 		msg_exit("error: " + std::string(e.what()));
 	}
 
-	PatientData patient_data(input_patient);
+	PatientData patient_data(data_path, input_patient);
 
 	auto& sax = patient_data.sax_seqs[8];
 
@@ -236,10 +325,10 @@ int main(int argc, char ** argv)
 	int superpixel_num = 200;
 	size_t landmark_num = 16;
 
-	HogLvDetector lv_detector;
+	//HogLvDetector lv_detector;
 
 	ShapeRegressor regressor;
-	regressor.Load("cpr_model_hog_detections.txt");
+	regressor.Load("cpr_model_circled.txt");
 
 	while (key != 'q') {
 		const int prev_sax_id = sax_id;
@@ -288,16 +377,38 @@ int main(int argc, char ** argv)
 
 		cv::Mat detection_image = cur_image.clone();
 		cv::resize(detection_image, detection_image, cv::Size(), 1.5, 1.5, cv::INTER_CUBIC);
-		cv::Rect2d lv_rect = lv_detector.detect(detection_image, inter.p_sax * 1.5, true);
-		lv_rect.x /= 1.5;
-		lv_rect.y /= 1.5;
-		lv_rect.width /= 1.5;
-		lv_rect.height /= 1.5;
-		BoundingBox lv_bbox = { lv_rect.x, lv_rect.y, lv_rect.width, lv_rect.height, lv_rect.x + lv_rect.width / 2.0, lv_rect.y + lv_rect.height / 2.0 };
+		
+		cv::Mat1f imagef;
+		cur_image.convertTo(imagef, imagef.type());
+		double R = get_circle_for_point(imagef, cur_slice.estimated_center);
+
+		
+		//if (lv_rect.size.width > 2.5 * lv_rect.size.height) {
+		//	lv_rect.size.width = 1.5 * lv_rect.size.height;
+		//}
+		//else if (lv_rect.size.height > 2.5 * lv_rect.size.width) {
+		//	lv_rect.size.height = 1.5 * lv_rect.size.width;
+		//}
+		//cv::Rect lv_brect(lv_rect.center - cv::Point2f(lv_rect.size.width, lv_rect.size.height) / 2, lv_rect.size);// = lv_rect.boundingRect();
+
+		BoundingBox lv_bbox;
+		lv_bbox.start_x = cur_slice.estimated_center.x - R * 1.1;
+		lv_bbox.start_y = cur_slice.estimated_center.y - R * 1.1;
+		lv_bbox.width = 2 * R * 1.1;
+		lv_bbox.height = 2 * R * 1.1;
+		lv_bbox.centroid_x = lv_bbox.start_x + lv_bbox.width / 2.0;
+		lv_bbox.centroid_y = lv_bbox.start_y + lv_bbox.height / 2.0;
+
+		//cv::Rect2d lv_rect = lv_detector.detect(detection_image, inter.p_sax * 1.5, true);
+		//lv_rect.x /= 1.5;
+		//lv_rect.y /= 1.5;
+		//lv_rect.width /= 1.5;
+		//lv_rect.height /= 1.5;
+		//BoundingBox lv_bbox = { lv_rect.x, lv_rect.y, lv_rect.width, lv_rect.height, lv_rect.x + lv_rect.width / 2.0, lv_rect.y + lv_rect.height / 2.0 };
 		
 		cv::Mat1b cur_image1b;
 		cur_image.convertTo(cur_image1b, cur_image1b.type(), 255);
-		cv::Mat1d current_shape = lv_rect.area() > 0 ? regressor.Predict(cur_image1b, lv_bbox, 1) : cv::Mat1d::zeros(1, landmark_num);
+		cv::Mat1d current_shape = lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, 1) : cv::Mat1d::zeros(1, landmark_num);
 
 		double roi_sz = 0.2 * cur_slice.image.cols;
 		cv::Rect roi(inter.p_sax - cv::Point2d{ roi_sz, roi_sz }, inter.p_sax + cv::Point2d{ roi_sz, roi_sz });
