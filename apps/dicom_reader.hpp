@@ -20,6 +20,13 @@ struct OrientedObject
 
 	inline cv::Vec3d normal() const { return row_dc.cross(col_dc); };
 
+	// Distance
+	double distance_from_point(const cv::Vec3d& p)
+	{
+		const cv::Vec3d v(p - position);
+		return std::abs(normal().dot(v));
+	}
+
 	cv::Point2d point_to_image(const cv::Vec3d& p) const
 	{
 		const cv::Mat1d projection = rotation_matrix().inv() * cv::Mat1d(p - position);
@@ -37,7 +44,10 @@ struct OrientedObject
 
 struct Slice : public OrientedObject
 {
+	Slice() : empty(true) {}
 	Slice(const std::string& filename);
+
+	bool empty;
 
 	std::string filename; // relative path to image
 	size_t frame_number;

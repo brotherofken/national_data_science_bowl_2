@@ -29,6 +29,9 @@
 #include "hog_lv_detector.hpp"
 #include "dicom_reader.hpp"
 
+#include "opencv/plot.hpp"
+#include "compute_volume.h"
+
 cv::Mat1i gmm_segmentaiton(const cv::Mat1f& img_roi)
 {
 	cv::Mat tmp;
@@ -230,6 +233,23 @@ contours_t draw_global_mask(const double scale = 1.)
 	return hull;
 }
 
+double compute_polyon_area(const std::vector<cv::Point2d>& polygon)
+{
+	double area{};
+
+	size_t n = polygon.size();
+	if (n < 3) return 0;  // a degenerate polygon
+
+	std::vector<cv::Point2d> V = polygon;
+	V.push_back(V[0]);
+
+	int  i, j, k;
+	for (i = 1, j = 2, k = 0; i < n; i++, j++, k++) {
+		area += V[i].x * (V[j].y - V[k].y);
+	}
+	area += V[n].x * (V[1].y - V[n - 1].y);  // wrap-around term
+	return area / 2.0;
+}
 
 enum Keys {
 	Down  = 's',
@@ -248,15 +268,13 @@ Slice& get_next_slice(Sequence& seq, const size_t id) { return seq.slices[get_ne
 
 int main(int argc, char ** argv)
 {
-	PeronaMalikArgs pm_args;
-	struct ChanVeseArgs cv_args;
+	std::string input_patient{};
+	std::string data_path{};
 
-	std::string input_patient;
-	std::string data_path;
-
-	bool object_selection = false;
-	bool segment = false;
+	bool save_landmarks = false;
 	bool show_windows = false;
+
+	size_t cpr_repeats{5};
 
 	//-- Parse command line arguments
 	//   Negative values in multitoken are not an issue, b/c it doesn't make much sense
@@ -268,20 +286,10 @@ int main(int argc, char ** argv)
 			("help,h", "this message")
 			("input,i", po::value<std::string>(&input_patient), "patient directory")
 			("data,d", po::value<std::string>(&data_path), "data directory")
-			("mu", po::value<double>(&cv_args.mu)->default_value(0.5), "length penalty parameter (must be positive or zero)")
-			("nu", po::value<double>(&cv_args.nu)->default_value(0), "area penalty parameter")
-			("dt", po::value<double>(&cv_args.dt)->default_value(1), "timestep")
-			("lambda2", po::value<double>(&cv_args.lambda2)->default_value(1.), "penalty of variance outside the contour (default: 1's)")
-			("lambda1", po::value<double>(&cv_args.lambda1)->default_value(1.), "penalty of variance inside the contour (default: 1's)")
-			("epsilon,e", po::value<double>(&cv_args.eps)->default_value(1), "smoothing parameter in Heaviside/delta")
-			("tolerance,t", po::value<double>(&cv_args.tol)->default_value(0.001), "tolerance in stopping condition")
-			("max-steps,N", po::value<int>(&cv_args.max_steps)->default_value(1000), "maximum nof iterations (negative means unlimited)")
-			("edge-coef,K", po::value<double>(&pm_args.K)->default_value(10), "coefficient for enhancing edge detection in Perona-Malik")
-			("laplacian-coef,L", po::value<double>(&pm_args.L)->default_value(0.25), "coefficient in the gradient FD scheme of Perona-Malik (must be [0, 1/4])")
-			("segment-time,T", po::value<double>(&pm_args.T)->default_value(20), "number of smoothing steps in Perona-Malik")
-			("segment,S", po::bool_switch(&segment), "segment the image with Perona-Malik beforehand")
-			("select,s", po::bool_switch(&object_selection), "separate the region encolosed by the contour (adds suffix '_selection')")
-			("show", po::bool_switch(&show_windows), "");
+			("repeats,r", po::value<size_t>(&cpr_repeats), "CPR repeats count")
+			("show,s", "show gui with contours")
+			("landmarks,l", "compute and save landmarks")
+			;
 		po::variables_map vm;
 		po::store(po::command_line_parser(argc, argv).options(desc).run(), vm);
 		po::notify(vm);
@@ -292,14 +300,9 @@ int main(int argc, char ** argv)
 		}
 		if (!vm.count("input")) msg_exit("Error: you have to specify input file name!");
 		if (vm.count("input") && !boost::filesystem::exists(data_path + "/" + input_patient)) msg_exit("Error: file \"" + input_patient + "\" does not exists!");
-		if (vm.count("dt") && cv_args.dt <= 0) msg_exit("Cannot have negative or zero timestep: " + std::to_string(cv_args.dt) + ".");
-		if (vm.count("mu") && cv_args.mu < 0) msg_exit("Length penalty parameter cannot be negative: " + std::to_string(cv_args.mu) + ".");
-		if (vm.count("lambda1") && cv_args.lambda1 < 0) msg_exit("Any value of lambda1 cannot be negative.");
-		if (vm.count("lambda2") && cv_args.lambda2 < 0) msg_exit("Any value of lambda2 cannot be negative.");
-		if (vm.count("eps") && cv_args.eps < 0) msg_exit("Cannot have negative smoothing parameter: " + std::to_string(cv_args.eps) + ".");
-		if (vm.count("tol") && cv_args.tol < 0) msg_exit("Cannot have negative tolerance: " + std::to_string(cv_args.tol) + ".");
-		if (vm.count("laplacian-coef") && (pm_args.L > 0.25 || pm_args.L < 0)) msg_exit("The Laplacian coefficient in Perona-Malik segmentation must be between 0 and 0.25.");
-		if (vm.count("segment-time") && (pm_args.T < pm_args.L)) msg_exit("The segmentation duration must exceed the value of Laplacian coefficient, " + std::to_string(pm_args.L) + ".");
+		save_landmarks = vm.count("landmarks");
+		show_windows = vm.count("show");
+		if (!vm.count("repeats")) cpr_repeats = 5;
 	}
 	catch (std::exception & e) {
 		msg_exit("error: " + std::string(e.what()));
@@ -307,16 +310,16 @@ int main(int argc, char ** argv)
 
 	PatientData patient_data(data_path, input_patient);
 
-	auto& sax = patient_data.sax_seqs[8];
-
-	cv::Vec3d point_3d = slices_intersection(patient_data.ch2_seq.slices[0], patient_data.ch4_seq.slices[0], sax.slices[0]);
-	cv::Point2d point = sax.point_to_image(point_3d);
-
-	cv::Mat1d img = sax.slices[11].image;
-	std::string input_filename = sax.slices[0].filename;
-
-	std::pair <double, double> min_max = patient_data.get_min_max_bp_level();
-	std::cout << "min_max: " << min_max.first << " " << min_max.second << std::endl;
+	//auto& sax = patient_data.sax_seqs[8];
+	//
+	//cv::Vec3d point_3d = slices_intersection(patient_data.ch2_seq.slices[0], patient_data.ch4_seq.slices[0], sax.slices[0]);
+	//cv::Point2d point = sax.point_to_image(point_3d);
+	//
+	//cv::Mat1d img = sax.slices[11].image;
+	//std::string input_filename = sax.slices[0].filename;
+	//
+	//std::pair <double, double> min_max = patient_data.get_min_max_bp_level();
+	//std::cout << "min_max: " << min_max.first << " " << min_max.second << std::endl;
 
 	int sax_id = 0;
 	int slice_id = 0;
@@ -329,10 +332,23 @@ int main(int argc, char ** argv)
 	ShapeRegressor regressor;
 	regressor.Load("cpr_model_circled_kmeans_smooth.txt");
 
-	if (true) {
+	auto shape2polygon = [] (const cv::Mat1d& shape, const cv::Vec3d& spacing) {
+		std::vector<cv::Point2d> result;
+		for (size_t i{}; i < shape.rows; ++i) {
+			cv::Point2d point2d{ shape(i, 0)*spacing[0], shape(i, 1) *spacing[1] };
+			result.push_back(point2d);
+		}
+		return result;
+	};
+
+	{ // Pre-compute landmarks
 		std::vector<std::vector<cv::Vec3d>> points3d(patient_data.sax_seqs[0].slices.size());
 		std::cout << "Computing landmarks locations.. " << std::endl;
+
+		cv::Mat1d rads = cv::Mat1d(patient_data.sax_seqs.size(), patient_data.sax_seqs[0].slices.size(), 0.);
+		int i{};
 		for (Sequence& seq : patient_data.sax_seqs) {
+			int j{};
 			for (Slice& cur_slice : seq.slices) {
 				std::cout << " " << seq.name << "/" << cur_slice.frame_number << "\t\t\t\r";
 				cv::Mat cur_image = (cur_slice.image.clone());
@@ -340,8 +356,43 @@ int main(int argc, char ** argv)
 
 				cv::Mat1f imagef;
 				cur_image.convertTo(imagef, imagef.type());
-				double R = get_circle_for_point(imagef, cur_slice.estimated_center);
+				const double R = get_circle_for_point(imagef, cur_slice.estimated_center);
+				cur_slice.aux["R"] = cv::Mat1d(1, 1, R);
+				rads(i, j) = R;
+				j++;
+			}
+			i++;
+		}
 
+		cv::Mat1d filtered_rads;
+		cv::Mat1d rads_normalized(rads.size());
+		{
+			cv::Mat1d rads_sorted;
+			cv::sort(rads, rads_sorted, cv::SORT_ASCENDING | cv::SORT_EVERY_ROW);
+
+			for (size_t r{}; r < rads.rows; ++r) {
+				 cv::Mat1d(rads.row(r) - rads_sorted(r, rads_sorted.cols / 2)).copyTo(rads_normalized.row(r));
+			}
+
+			cv::Mat1d w, u, vt;
+			size_t N = 1;
+			cv::SVD::compute(rads_normalized, w, u, vt, cv::SVD::FULL_UV);
+			vt = vt.rowRange(0, N);
+			filtered_rads = u.colRange(0, N) * cv::Mat::diag(w.rowRange(0, N));
+			filtered_rads = filtered_rads * vt;
+
+			for (size_t r{}; r < rads.rows; ++r) {
+				cv::Mat1d(filtered_rads.row(r) + rads_sorted(r, rads_sorted.cols / 2)).copyTo(filtered_rads.row(r));
+			}
+		}
+		cv::Mat1d diff = cv::abs(rads - filtered_rads);
+		cv::Mat1d diff_norm = diff / filtered_rads;
+		i = 0;
+		for (Sequence& seq : patient_data.sax_seqs) {
+			int j{};
+			for (Slice& cur_slice : seq.slices) {
+				cv::Mat cur_image = (cur_slice.image.clone());
+				const double R = filtered_rads(i,j);// cur_slice.aux["R"].at<double>(0, 0);
 				BoundingBox lv_bbox;
 				lv_bbox.start_x = cur_slice.estimated_center.x - R * 1.1;
 				lv_bbox.start_y = cur_slice.estimated_center.y - R * 1.1;
@@ -352,28 +403,38 @@ int main(int argc, char ** argv)
 
 				cv::Mat1b cur_image1b;
 				cur_image.convertTo(cur_image1b, cur_image1b.type(), 255);
-				cv::Mat1d current_shape = lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, 15) : cv::Mat1d::zeros(1, landmark_num);
+				cv::Mat1d current_shape = lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, cpr_repeats) : cv::Mat1d::zeros(1, landmark_num);
 
 				cur_slice.aux["landmarks"] = current_shape;
-				
+				j++;
 			}
+			i++;
 		}
-		std::cout << std::endl;
 
-		std::string lms_savepath = data_path + "/" + input_patient + "/landmarks.pts";
-		std::ofstream fout(lms_savepath);
+		std::cout << std::endl;
+	}
+	if (save_landmarks) {
+		std::string lms_savepath_2d = data_path + "/" + input_patient + "/landmarks_2d.pts";
+		std::string lms_savepath_3d = data_path + "/" + input_patient + "/landmarks_3d.pts";
+		std::cout << "Saving points to " << lms_savepath_3d << std::endl;
+		std::ofstream fout_2d(lms_savepath_2d);
+		std::ofstream fout_3d(lms_savepath_3d);
 		for (Sequence& seq : patient_data.sax_seqs) {
 			for (Slice& cur_slice : seq.slices) {
 				cv::Mat1d shape = cur_slice.aux["landmarks"];
 				for (size_t i{}; i < shape.rows; ++i) {
 					cv::Point2d point2d{ shape(i, 0), shape(i, 1) };
 					const cv::Vec3d point3d = cur_slice.point_to_3d(point2d);
-					fout << seq.name << "\t" << cur_slice.frame_number << "\t" << point3d[0] << "\t" << point3d[1] << "\t" << point3d[2] << std::endl;
+					fout_2d << seq.name << "\t" << cur_slice.frame_number << "\t" << point2d.x << "\t" << point2d.y << std::endl;
+					fout_3d << seq.name << "\t" << cur_slice.frame_number << "\t" << point3d[0] << "\t" << point3d[1] << "\t" << point3d[2] << std::endl;
 				}
 			}
 		}
 		
 	}
+
+	if (!show_windows)
+		return EXIT_SUCCESS;
 
 	while (key != 'q') {
 		const int prev_sax_id = sax_id;
@@ -393,10 +454,11 @@ int main(int argc, char ** argv)
 
 
 		// Get data for current slice
+		Slice& prev_sax = patient_data.sax_seqs[prev_sax_id].slices[slice_id];
 		Slice& cur_slice = patient_data.sax_seqs[sax_id].slices[slice_id];
-		Slice& ch2_slice = patient_data.ch2_seq.slices[slice_id];
-		Slice& ch4_slice = patient_data.ch4_seq.slices[slice_id];
-		const PatientData::Intersection& inter = patient_data.intersections[sax_id];
+		Slice no_slice;
+		Slice& ch2_slice = patient_data.ch2_seq.empty ? no_slice : patient_data.ch2_seq.slices[slice_id];
+		Slice& ch4_slice = patient_data.ch4_seq.empty ? no_slice : patient_data.ch4_seq.slices[slice_id];
 
 		if (sax_id != prev_sax_id || slice_id != prev_slice_id) {
 			// save mask
@@ -416,9 +478,8 @@ int main(int argc, char ** argv)
 			patient_data.save_contours();
 		}
 
-		cv::Mat cur_image = (cur_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
-		cv::Mat ch2_image = (ch2_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
-		cv::Mat ch4_image = (ch4_slice.image.clone());// - min_max.first)/(min_max.second - min_max.first);
+		cv::Mat cur_image = (cur_slice.image.clone());
+
 
 		cv::Mat1f imagef;
 		cur_image.convertTo(imagef, imagef.type());
@@ -434,67 +495,67 @@ int main(int argc, char ** argv)
 
 		cv::Mat1b cur_image1b;
 		imagef.convertTo(cur_image1b, cur_image1b.type(), 255);
-		cv::Mat1d current_shape = lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, 15) : cv::Mat1d::zeros(1, landmark_num);
+		cv::Mat1d current_shape = cur_slice.aux["landmarks"];//lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, cpr_repeats) : cv::Mat1d::zeros(1, landmark_num);
+		
+		std::cout
+			<< "Area: " << compute_polyon_area(shape2polygon(current_shape, cur_slice.pixel_spacing)) << '\t'
+			<< "Dist: " << cur_slice.distance_from_point(prev_sax.position) << std::endl;
 
-		double roi_sz = 0.2 * cur_slice.image.cols;
-		cv::Rect roi(inter.p_sax - cv::Point2d{ roi_sz, roi_sz }, inter.p_sax + cv::Point2d{ roi_sz, roi_sz });
-		roi = roi & cv::Rect({ 0, 0 }, cur_image.size());
+		//double roi_sz = 0.2 * cur_slice.image.cols;
+		//cv::Rect roi(inter.p_sax - cv::Point2d{ roi_sz, roi_sz }, inter.p_sax + cv::Point2d{ roi_sz, roi_sz });
+		//roi = roi & cv::Rect({ 0, 0 }, cur_image.size());
 
 		// Drawing
 		{
 			const double max = 1;
-
-			const double val_sax = cv::mean(cur_image(cv::Rect(inter.p_sax - cv::Point2d{ 1,1 }, inter.p_sax + cv::Point2d{ 1,1 })))[0];
-			const double val_ch2 = cv::mean(ch2_image(cv::Rect(inter.p_ch2 - cv::Point2d{ 1,1 }, inter.p_ch2 + cv::Point2d{ 1,1 })))[0];
-			const double val_ch4 = cv::mean(ch4_image(cv::Rect(inter.p_ch4 - cv::Point2d{ 1,1 }, inter.p_ch4 + cv::Point2d{ 1,1 })))[0];
-
-			cur_image.convertTo(cur_image, CV_32FC1);
-			ch2_image.convertTo(ch2_image, CV_32FC1);
-			ch4_image.convertTo(ch4_image, CV_32FC1);
-
-			cv::cvtColor(cur_image, cur_image, cv::COLOR_GRAY2BGR);
-			cv::cvtColor(ch2_image, ch2_image, cv::COLOR_GRAY2BGR);
-			cv::cvtColor(ch4_image, ch4_image, cv::COLOR_GRAY2BGR);
 
 			const auto draw_line = [] (cv::Mat& image, const Slice& slice, const line_eq_t& line, cv::Scalar color) {
 				const cv::Point2d p1 = slice.point_to_image(line(-1000));
 				const cv::Point2d p2 = slice.point_to_image(line(1000));
 				cv::line(image, p1, p2, color, 1);
 			};
-			
-			draw_line(ch4_image, ch4_slice, inter.l24, cv::Scalar(0, max, 0));
-			draw_line(ch2_image, ch2_slice, inter.l24, cv::Scalar(0, max, 0));
-			draw_line(ch2_image, ch2_slice, inter.ls2, cv::Scalar(max, 0, 0));
-			draw_line(cur_image, cur_slice, inter.ls2, cv::Scalar(max, 0, 0));
-			draw_line(ch4_image, ch4_slice, inter.ls4, cv::Scalar(max, 0, 0));
-			draw_line(cur_image, cur_slice, inter.ls4, cv::Scalar(max, 0, 0));
-			cv::circle(cur_image, inter.p_sax, 2, cv::Scalar(0., 0., max), -1);
-			cv::circle(ch2_image, inter.p_ch2, 2, cv::Scalar(0., 0., max), -1);
-			cv::circle(ch4_image, inter.p_ch4, 2, cv::Scalar(0., 0., max), -1);
 
 			const double scale = 256. / cur_image.cols;
-			cv::resize(cur_image, cur_image, cv::Size(0, 0), scale, scale, CV_INTER_LANCZOS4);
-			cv::resize(ch2_image, ch2_image, cv::Size(0, 0), scale, scale, CV_INTER_LANCZOS4);
-			cv::resize(ch4_image, ch4_image, cv::Size(0, 0), scale, scale, CV_INTER_LANCZOS4);
 
+			cur_image.convertTo(cur_image, CV_32FC1);
+			cv::cvtColor(cur_image, cur_image, cv::COLOR_GRAY2BGR);
+			if (!ch2_slice.empty && !ch4_slice.empty) {
+				const PatientData::Intersection& inter = patient_data.intersections[sax_id];
+				draw_line(cur_image, cur_slice, inter.ls2, cv::Scalar(max, 0, 0));
+				draw_line(cur_image, cur_slice, inter.ls4, cv::Scalar(max, 0, 0));
+				cv::circle(cur_image, inter.p_sax, 2, cv::Scalar(0., 0., max), -1);
+			}
+			cv::resize(cur_image, cur_image, cv::Size(0, 0), scale, scale, CV_INTER_LANCZOS4);
 			const std::string navigtaion_text = std::to_string(sax_id+1) + "/" + std::to_string(patient_data.sax_seqs.size()) + "   " + std::to_string(slice_id+1)+"/" + std::to_string(sequence_len);
 			cv::putText(cur_image, navigtaion_text, cv::Point(10, 15), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
-			cv::putText(cur_image, std::to_string(val_sax), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
-			
 			const std::string slice_info = std::to_string(cur_slice.pixel_spacing[0]) + " " + std::to_string(cur_slice.pixel_spacing[0]);
 			cv::putText(cur_image, slice_info, cv::Point(10, 45), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
-
-			cv::putText(ch2_image, std::to_string(val_ch2), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
-			cv::putText(ch4_image, std::to_string(val_ch4), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
-
 			for (int i = 0; i < landmark_num; i++) {
-				circle(cur_image, cv::Point2d(current_shape(i, 0), current_shape(i, 1)) * scale, 1, cv::Scalar(0, 0, 255), -1, 8, 0);
+				cv::circle(cur_image, cv::Point2d(current_shape(i, 0), current_shape(i, 1)) * scale, 1, cv::Scalar(0, 0, 255), -1, 8, 0);
 			}
-
 			cv::imshow("cur_slice", cur_image);
+
+			if (!ch2_slice.empty && !ch4_slice.empty) {
+				const PatientData::Intersection& inter = patient_data.intersections[sax_id];
+				cv::Mat ch2_image = ch2_slice.image.clone();
+				ch2_image.convertTo(ch2_image, CV_32FC1);
+				cv::cvtColor(ch2_image, ch2_image, cv::COLOR_GRAY2BGR);
+				draw_line(ch2_image, ch2_slice, inter.l24, cv::Scalar(0, max, 0));
+				draw_line(ch2_image, ch2_slice, inter.ls2, cv::Scalar(max, 0, 0));
+				cv::circle(ch2_image, inter.p_ch2, 2, cv::Scalar(0., 0., max), -1);
+				cv::resize(ch2_image, ch2_image, cv::Size(0, 0), scale, scale, CV_INTER_LANCZOS4);
+				cv::imshow("ch2", ch2_image);
+
+				cv::Mat ch4_image = ch4_slice.image.clone();
+				ch4_image.convertTo(ch4_image, CV_32FC1);
+				cv::cvtColor(ch4_image, ch4_image, cv::COLOR_GRAY2BGR);
+				draw_line(ch4_image, ch4_slice, inter.l24, cv::Scalar(0, max, 0));
+				draw_line(ch4_image, ch4_slice, inter.ls4, cv::Scalar(max, 0, 0));
+				cv::circle(ch4_image, inter.p_ch4, 2, cv::Scalar(0., 0., max), -1);
+				cv::resize(ch4_image, ch4_image, cv::Size(0, 0), scale, scale, CV_INTER_LANCZOS4);
+				cv::imshow("ch4", ch4_image);
+			}
 			cv::imwrite("tmp/slice_" + std::to_string(sax_id) + "_frame_" + std::to_string(slice_id) + ".png", 255*cur_image);
-			cv::imshow("ch2", ch2_image);
-			cv::imshow("ch4", ch4_image);
 		}
 		key = cv::waitKey();
 	}

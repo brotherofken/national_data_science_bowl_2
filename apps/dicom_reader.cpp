@@ -134,7 +134,8 @@ size_t get_patient_id(const std::string& dcm_filename)
 
 // Bad style, no time for refactoring
 Slice::Slice(const std::string& filename)
-	: filename(filename)
+	: empty(false)
+	, filename(filename)
 	, frame_number(get_frame_number(filename))
 	, patient_id(get_patient_id(filename))
 {
