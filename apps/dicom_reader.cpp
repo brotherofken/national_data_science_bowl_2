@@ -279,52 +279,63 @@ PatientData::PatientData(const std::string& data_path, const std::string& direct
 		}
 	}
 
+	// Median filtering of point locations
+	for (Sequence& sax : sax_seqs) {
+		for (int i{}; i < sax.slices.size(); ++i) {
+			std::vector<cv::Point> points = {
+				sax.slices[i - 1 < 0 ? (sax.slices.size() - 1) : (i - 1)].estimated_center, 
+				sax.slices[i].estimated_center,
+				sax.slices[(i + 1) % sax.slices.size()].estimated_center
+			};
+			const auto median = [](double a, double b, double c) {return std::max(std::min(a, b), std::min(std::max(a, b), c)); };
+			sax.slices[i].estimated_center.x = median(points[0].x, points[1].x, points[2].x);
+			sax.slices[i].estimated_center.y = median(points[0].y, points[1].y, points[2].y);
+		}
+	}
+
 	const bool chamber_views_ok = !ch2_seq.empty && !ch4_seq.empty;
 
-	std::sort(sax_seqs.begin(), sax_seqs.end(), [](Sequence& a, Sequence& b) { return a.slice_location < b.slice_location; });
 
 	if (chamber_views_ok)
-	for (const Sequence& sax : sax_seqs) {
+	for (Sequence& sax : sax_seqs) {
 		const cv::Vec3d point_3d = slices_intersection(sax, ch2_seq, ch4_seq);
-		intersections.push_back({
-			slices_intersection(ch2_seq, ch4_seq),
-			slices_intersection(sax, ch2_seq),
-			slices_intersection(sax, ch4_seq),
+		sax.intersection = {slices_intersection(ch2_seq, ch4_seq), slices_intersection(sax, ch2_seq), slices_intersection(sax, ch4_seq),
 			point_3d,
-			sax.point_to_image(point_3d),
-			ch2_seq.point_to_image(point_3d),
-			ch4_seq.point_to_image(point_3d)
-		});
+			sax.point_to_image(point_3d), ch2_seq.point_to_image(point_3d), ch4_seq.point_to_image(point_3d)
+		};
 	}
+	std::sort(sax_seqs.begin(), sax_seqs.end(), [](Sequence& a, Sequence& b) { return a.intersection.p[1] > b.intersection.p[1]; });
 }
 
 std::pair<double, double> PatientData::get_min_max_bp_level() const
 {
-	const auto accumulate_ = [=](size_t i, double& value, std::function<double(double, double)> reduce_) {
-		for (size_t j{}; j < ch2_seq.slices.size(); ++j) {
-			if (cv::Rect(cv::Point{ 0, 0 }, ch2_seq.slices[j].image.size()).contains(intersections[i].p_ch2))
-				value = reduce_(value, ch2_seq.slices[j].image(intersections[i].p_ch2));// cv::mean(ch2_seq.slices[j].image(cv::Rect(intersections[i].p_ch2 - cv::Point2d{ 1,1 }, intersections[i].p_ch2 + cv::Point2d{ 1,1 })))[0]);
-		}
-		for (size_t j{}; j < ch4_seq.slices.size(); ++j) {
-			if (cv::Rect(cv::Point{ 0, 0 }, ch4_seq.slices[j].image.size()).contains(intersections[i].p_ch4))
-				value = reduce_(value, ch4_seq.slices[j].image(intersections[i].p_ch4));//cv::mean(ch4_seq.slices[j].image(cv::Rect(intersections[i].p_ch4 - cv::Point2d{ 1,1 }, intersections[i].p_ch4 + cv::Point2d{ 1,1 })))[0]);
-		}
-		const auto& s = sax_seqs[i];
-		for (size_t j{}; j < s.slices.size(); ++j) {
-			if (cv::Rect(cv::Point{ 0, 0 }, s.slices[j].image.size()).contains(intersections[i].p_sax))
-				value = reduce_(value, s.slices[j].image(intersections[i].p_sax)); // cv::mean(s.slices[j].image(cv::Rect(intersections[i].p_sax - cv::Point2d{ 1,1 }, intersections[i].p_sax + cv::Point2d{ 1,1 })))[0]);
-		}
-	};
-
-	double minv = std::numeric_limits<double>::max();
-	double maxv = std::numeric_limits<double>::min();
-
-	for (size_t i{}; i < intersections.size(); ++i) {
-		accumulate_(i, minv, [](double v1, double v2) {return std::min(v1, v2); });
-		accumulate_(i, maxv, [](double v1, double v2) {return std::max(v1, v2); });
-	}
-
-	return std::pair<double, double>(0.5 * minv, maxv * 1.5);
+//	const auto accumulate_ = [=](size_t i, double& value, std::function<double(double, double)> reduce_) {
+//		for (size_t j{}; j < ch2_seq.slices.size(); ++j) {
+//			if (cv::Rect(cv::Point{ 0, 0 }, ch2_seq.slices[j].image.size()).contains(sax_seqs[i].intersection.p_ch2))
+//				value = reduce_(value, ch2_seq.slices[j].image(sax_seqs[i].intersection.p_ch2));// cv::mean(ch2_seq.slices[j].image(cv::Rect(intersections[i].p_ch2 - cv::Point2d{ 1,1 }, intersections[i].p_ch2 + cv::Point2d{ 1,1 })))[0]);
+//		}
+//		for (size_t j{}; j < ch4_seq.slices.size(); ++j) {
+//			if (cv::Rect(cv::Point{ 0, 0 }, ch4_seq.slices[j].image.size()).contains(sax_seqs[i].intersection.p_ch4))
+//				value = reduce_(value, ch4_seq.slices[j].image(sax_seqs[i].intersection.p_ch4));//cv::mean(ch4_seq.slices[j].image(cv::Rect(intersections[i].p_ch4 - cv::Point2d{ 1,1 }, intersections[i].p_ch4 + cv::Point2d{ 1,1 })))[0]);
+//		}
+//		const auto& s = sax_seqs[i];
+//		for (size_t j{}; j < s.slices.size(); ++j) {
+//			if (cv::Rect(cv::Point{ 0, 0 }, s.slices[j].image.size()).contains(s[i].p_sax))
+//				value = reduce_(value, s.slices[j].image(s[i].p_sax)); // cv::mean(s.slices[j].image(cv::Rect(intersections[i].p_sax - cv::Point2d{ 1,1 }, intersections[i].p_sax + cv::Point2d{ 1,1 })))[0]);
+//		}
+//	};
+//
+//	double minv = std::numeric_limits<double>::max();
+//	double maxv = std::numeric_limits<double>::min();
+//
+//	for (size_t i{}; i < sax_seqs.size(); ++i) {
+//		accumulate_(i, minv, [](double v1, double v2) {return std::min(v1, v2); });
+//		accumulate_(i, maxv, [](double v1, double v2) {return std::max(v1, v2); });
+//	}
+//
+//
+	throw "Not implemented";
+	return std::pair<double, double>(0,0);
 }
 
 

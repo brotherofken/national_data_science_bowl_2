@@ -57,7 +57,7 @@ cv::Mat1i gmm_segmentaiton(const cv::Mat1f& img_roi)
 	gmm->trainEM(samples, cv::noArray(), labels, cv::noArray());
 #else
 	cv::Mat labels;
-	cv::kmeans(samples, 3, labels, cv::TermCriteria(), 3, cv::KMEANS_PP_CENTERS);
+	cv::kmeans(samples, 2, labels, cv::TermCriteria(), 3, cv::KMEANS_PP_CENTERS);
 #endif
 
 	labels = labels.reshape(1, img_roi.rows);
@@ -258,6 +258,7 @@ enum Keys {
 	Right = 'd',
 	DecSP = '[',
 	IncSP = ']',
+	SwitchRType = 'r',
 };
 
 size_t get_prev_sax_idx(const Sequence& seq, const size_t id) { return (int(id) - 1 <= 0) ? (seq.slices.size() - 1) : (id - 1); }
@@ -341,11 +342,13 @@ int main(int argc, char ** argv)
 		return result;
 	};
 
+	cv::Mat1d filtered_rads_final, rads;
 	{ // Pre-compute landmarks
 		std::vector<std::vector<cv::Vec3d>> points3d(patient_data.sax_seqs[0].slices.size());
 		std::cout << "Computing landmarks locations.. " << std::endl;
 
-		cv::Mat1d rads = cv::Mat1d(patient_data.sax_seqs.size(), patient_data.sax_seqs[0].slices.size(), 0.);
+		//cv::Mat1d 
+		rads = cv::Mat1d(patient_data.sax_seqs.size(), patient_data.sax_seqs[0].slices.size(), 0.);
 		int i{};
 		for (Sequence& seq : patient_data.sax_seqs) {
 			int j{};
@@ -364,35 +367,55 @@ int main(int argc, char ** argv)
 			i++;
 		}
 
-		cv::Mat1d filtered_rads;
-		cv::Mat1d rads_normalized(rads.size());
+		cv::Mat1d rads_dx;
+		cv::Mat1d kernel_dx = (cv::Mat1d(1, 2) << -1, 1);
+		cv::hconcat(std::vector<cv::Mat1d>{3, rads}, rads_dx);
+		cv::filter2D(rads_dx, rads_dx, -1, kernel_dx, cv::Point(-1, -1), 0, cv::BORDER_REPLICATE);
+		rads_dx = rads_dx(cv::Rect(cv::Point(rads.cols/*-1*/, 0), rads.size()/* + cv::Size(2,0)*/));
+		cv::Mat1d abs_rads_dx = cv::abs(rads_dx);
+		
+		cv::Mat1b bad_elemets(rads.size(), 0);
+		for (size_t r = 0; r < rads.rows; r++) {
+			for (size_t c = 0; c < rads.cols; c++) {
+				const bool large_R_absolute_change = abs_rads_dx(r, (c + 1) % rads.cols) > 5 * abs_rads_dx(r, c);
+				const bool large_R_relative_change = 
+					rads(r, (c + 1) % rads.cols) > 1.15 * rads(r, (c + 0) % rads.cols) ||
+					rads(r, (c + 0) % rads.cols) > 1.15 * rads(r, (c + 1) % rads.cols);
+				const bool big_gradient = abs_rads_dx(r, (c + 1) % rads.cols) > 2.5;
+				if (large_R_absolute_change && large_R_relative_change && big_gradient && c < (rads.cols - 1)) {
+					size_t start_c = c;
+					c++;
+					bad_elemets(r, c) = 255;
+					c++;
+					while (c < rads.cols &&
+						((abs_rads_dx(r, c + 0) - std::abs(abs_rads_dx(r, (c + 1) % rads.cols)) < 2) ||
+						(rads(r,c)/ rads(r, start_c) > 3))) {
+						bad_elemets(r, c++) = 255;
+					}
+				}
+			}
+		}
+		cv::imshow("bad_elemets", bad_elemets);
+
+		//cv::Mat1d
+		cv::Mat1d medians(rads.size());
 		{
 			cv::Mat1d rads_sorted;
 			cv::sort(rads, rads_sorted, cv::SORT_ASCENDING | cv::SORT_EVERY_ROW);
 
 			for (size_t r{}; r < rads.rows; ++r) {
-				 cv::Mat1d(rads.row(r) - rads_sorted(r, rads_sorted.cols / 2)).copyTo(rads_normalized.row(r));
-			}
-
-			cv::Mat1d w, u, vt;
-			size_t N = 1;
-			cv::SVD::compute(rads_normalized, w, u, vt, cv::SVD::FULL_UV);
-			vt = vt.rowRange(0, N);
-			filtered_rads = u.colRange(0, N) * cv::Mat::diag(w.rowRange(0, N));
-			filtered_rads = filtered_rads * vt;
-
-			for (size_t r{}; r < rads.rows; ++r) {
-				cv::Mat1d(filtered_rads.row(r) + rads_sorted(r, rads_sorted.cols / 2)).copyTo(filtered_rads.row(r));
+				cv::Mat1d(rads.row(r).size(), rads_sorted(r, rads_sorted.cols / 2)).copyTo(medians.row(r));
 			}
 		}
-		cv::Mat1d diff = cv::abs(rads - filtered_rads);
-		cv::Mat1d diff_norm = diff / filtered_rads;
+		filtered_rads_final = rads.clone();
+		medians.copyTo(filtered_rads_final, bad_elemets);
+
 		i = 0;
 		for (Sequence& seq : patient_data.sax_seqs) {
 			int j{};
 			for (Slice& cur_slice : seq.slices) {
 				cv::Mat cur_image = (cur_slice.image.clone());
-				const double R = filtered_rads(i,j);// cur_slice.aux["R"].at<double>(0, 0);
+				const double R = filtered_rads_final(i,j);// cur_slice.aux["R"].at<double>(0, 0);
 				BoundingBox lv_bbox;
 				lv_bbox.start_x = cur_slice.estimated_center.x - R * 1.1;
 				lv_bbox.start_y = cur_slice.estimated_center.y - R * 1.1;
@@ -436,6 +459,8 @@ int main(int argc, char ** argv)
 	if (!show_windows)
 		return EXIT_SUCCESS;
 
+	bool rtype = true;
+
 	while (key != 'q') {
 		const int prev_sax_id = sax_id;
 		const int prev_slice_id = slice_id;
@@ -448,6 +473,7 @@ int main(int argc, char ** argv)
 			case Right: slice_id = (slice_id + 1) % sequence_len; break;
 			case DecSP: superpixel_num = std::max(50, superpixel_num - 25); break;
 			case IncSP: superpixel_num = std::min(250, superpixel_num + 25); break;
+			case SwitchRType: rtype = !rtype; break;
 			case 'c': save_contours = true;
 			default: break;
 		}
@@ -484,7 +510,8 @@ int main(int argc, char ** argv)
 		cv::Mat1f imagef;
 		cur_image.convertTo(imagef, imagef.type());
 		double R = get_circle_for_point(imagef, cur_slice.estimated_center);
-
+		R = rtype ? rads(sax_id, slice_id) : filtered_rads_final(sax_id, slice_id);
+	
 		BoundingBox lv_bbox;
 		lv_bbox.start_x = cur_slice.estimated_center.x - R * 1.1;
 		lv_bbox.start_y = cur_slice.estimated_center.y - R * 1.1;
@@ -495,11 +522,14 @@ int main(int argc, char ** argv)
 
 		cv::Mat1b cur_image1b;
 		imagef.convertTo(cur_image1b, cur_image1b.type(), 255);
-		cv::Mat1d current_shape = cur_slice.aux["landmarks"];//lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, cpr_repeats) : cv::Mat1d::zeros(1, landmark_num);
+		//cv::Mat1d current_shape = cur_slice.aux["landmarks"];
+		cv::Mat1d current_shape = lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, cpr_repeats) : cv::Mat1d::zeros(1, landmark_num);
 		
 		std::cout
 			<< "Area: " << compute_polyon_area(shape2polygon(current_shape, cur_slice.pixel_spacing)) << '\t'
-			<< "Dist: " << cur_slice.distance_from_point(prev_sax.position) << std::endl;
+			<< "Dist: " << cur_slice.distance_from_point(prev_sax.position) << '\t'
+			<< "Rad:  " << (rtype ? "norm" : "filtered") << '\t'
+			<< std::endl;
 
 		//double roi_sz = 0.2 * cur_slice.image.cols;
 		//cv::Rect roi(inter.p_sax - cv::Point2d{ roi_sz, roi_sz }, inter.p_sax + cv::Point2d{ roi_sz, roi_sz });
@@ -520,7 +550,7 @@ int main(int argc, char ** argv)
 			cur_image.convertTo(cur_image, CV_32FC1);
 			cv::cvtColor(cur_image, cur_image, cv::COLOR_GRAY2BGR);
 			if (!ch2_slice.empty && !ch4_slice.empty) {
-				const PatientData::Intersection& inter = patient_data.intersections[sax_id];
+				const Intersection& inter = patient_data.sax_seqs[sax_id].intersection;
 				draw_line(cur_image, cur_slice, inter.ls2, cv::Scalar(max, 0, 0));
 				draw_line(cur_image, cur_slice, inter.ls4, cv::Scalar(max, 0, 0));
 				cv::circle(cur_image, inter.p_sax, 2, cv::Scalar(0., 0., max), -1);
@@ -533,10 +563,11 @@ int main(int argc, char ** argv)
 			for (int i = 0; i < landmark_num; i++) {
 				cv::circle(cur_image, cv::Point2d(current_shape(i, 0), current_shape(i, 1)) * scale, 1, cv::Scalar(0, 0, 255), -1, 8, 0);
 			}
+			cv::circle(cur_image, cur_slice.estimated_center * scale, 3, cv::Scalar(255, 0, 255), -1, 8, 0);
 			cv::imshow("cur_slice", cur_image);
 
 			if (!ch2_slice.empty && !ch4_slice.empty) {
-				const PatientData::Intersection& inter = patient_data.intersections[sax_id];
+				const Intersection& inter = patient_data.sax_seqs[sax_id].intersection;
 				cv::Mat ch2_image = ch2_slice.image.clone();
 				ch2_image.convertTo(ch2_image, CV_32FC1);
 				cv::cvtColor(ch2_image, ch2_image, cv::COLOR_GRAY2BGR);

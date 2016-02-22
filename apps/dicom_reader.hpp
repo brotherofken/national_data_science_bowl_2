@@ -6,6 +6,18 @@
 #include <utility>
 #include <functional>
 
+using line_eq_t = std::function<cv::Vec3d(double)>;
+struct Intersection {
+	line_eq_t l24;
+	line_eq_t ls2;
+	line_eq_t ls4;
+	cv::Vec3d p;
+	cv::Point2d p_sax;
+	cv::Point2d p_ch2;
+	cv::Point2d p_ch4;
+	using Vector = std::vector<Intersection>;
+};
+
 struct OrientedObject
 {
 	double slice_location;
@@ -77,27 +89,16 @@ struct Sequence : public OrientedObject
 	std::string name; // 2ch_*, 4ch_* or sax_*
 	size_t number; // Number that goes after _
 	Slice::Vector slices;
+	Intersection intersection;
 
 	using Vector = std::vector<Sequence>;
 };
 
-using line_eq_t = std::function<cv::Vec3d(double)>;
 
 struct PatientData
 {
 	static const std::string AUX_LV_MASK;// = "lv_mask";
 	static const std::string AUX_CONTOUR;// = "lv_annotation";
-
-	struct Intersection {
-		line_eq_t l24;
-		line_eq_t ls2;
-		line_eq_t ls4;
-		cv::Vec3d p;
-		cv::Point2d p_sax;
-		cv::Point2d p_ch2;
-		cv::Point2d p_ch4;
-		using Vector = std::vector<Intersection>;
-	};
 
 	PatientData(const std::string& data_path, const std::string& directory);
 
@@ -111,7 +112,7 @@ struct PatientData
 	Sequence ch2_seq;
 	Sequence ch4_seq;
 	Sequence::Vector sax_seqs;
-	Intersection::Vector intersections;
+	//Intersection::Vector intersections;
 };
 
 line_eq_t slices_intersection(const OrientedObject& s1, const OrientedObject& s2);
