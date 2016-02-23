@@ -11,7 +11,6 @@
 #include <fstream>
 #include <iterator>
 
-
 #include <boost/algorithm/string/predicate.hpp> // boost::iequals()
 #include <boost/algorithm/string/join.hpp> // boost::algorithm::join()
 
@@ -30,7 +29,22 @@
 #include "dicom_reader.hpp"
 
 #include "opencv/plot.hpp"
-#include "compute_volume.h"
+
+void visualize_mat(cv::Mat1d areas, const std::string& win_name, double cell_size = 32.) {
+	double min_area, max_area;
+	cv::minMaxLoc(areas, &min_area, &max_area);
+	cv::Mat areas_show(areas.size(), areas.type());
+	cv::resize(areas, areas_show, areas.size() * int(cell_size), 0, 0, cv::INTER_NEAREST);
+	areas_show = (areas_show - min_area) / (max_area - min_area);
+	cv::merge(std::vector<cv::Mat1d>{3, areas_show}, areas_show);
+	if (cell_size >= 32)
+		for (auto it = areas.begin(); it != areas.end(); ++it) {
+			std::string value = std::to_string(int(*it));
+			double intensity = *it / max_area;
+			cv::putText(areas_show, value, it.pos()*cell_size + cv::Point(cell_size / 10, cell_size / 2), cv::FONT_HERSHEY_SIMPLEX, 0.3, cv::Scalar::all((intensity > 0.6 ? 0.2 : 0.8)));
+		}
+	cv::imshow(win_name, areas_show);
+}
 
 cv::Mat1i gmm_segmentaiton(const cv::Mat1f& img_roi)
 {
@@ -57,7 +71,7 @@ cv::Mat1i gmm_segmentaiton(const cv::Mat1f& img_roi)
 	gmm->trainEM(samples, cv::noArray(), labels, cv::noArray());
 #else
 	cv::Mat labels;
-	cv::kmeans(samples, 2, labels, cv::TermCriteria(), 3, cv::KMEANS_PP_CENTERS);
+	cv::kmeans(samples, 3, labels, cv::TermCriteria(), 3, cv::KMEANS_PP_CENTERS);
 #endif
 
 	labels = labels.reshape(1, img_roi.rows);
@@ -70,11 +84,16 @@ double get_circle_for_point(const cv::Mat1f& img, const cv::Point& estimated_cen
 	// = cur_slice.estimated_center;// cur_slice.point_to_image(inter.p);
 	const double width = 0.2 * img.cols;
 	cv::Rect roi(estimated_center - cv::Point(width, width), estimated_center + cv::Point(width, width));
+	roi = roi & cv::Rect({ 0,0 }, img.size());
 	cv::Mat1f img_roi = img.clone();
 	img_roi = img_roi(roi);
 
 	cv::Mat1i labels = gmm_segmentaiton(img_roi);
 	cv::Mat1b segments = labels == labels(estimated_center - roi.tl());
+	cv::Mat1b segments_mask(segments.size(), 0);
+	cv::Rect segments_roi(cv::Point(0.125*segments.cols, 0.125*segments.rows), cv::Size(0.75*segments.cols, 0.75*segments.rows));
+	cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(0.75*segments.cols, 0.75*segments.rows)).copyTo(segments_mask(segments_roi));
+	segments = segments.mul(segments_mask);
 
 	using contours_t = std::vector<std::vector<cv::Point>>;
 	contours_t contours;
@@ -97,6 +116,7 @@ double get_circle_for_point(const cv::Mat1f& img, const cv::Point& estimated_cen
 	kernel = kernel * kernel.t();
 	cv::Mat1f magnitude;
 	segments.convertTo(magnitude, CV_32FC1, 1 / 255.);
+	cv::resize(kernel, kernel, magnitude.size(), 0, 0, cv::INTER_CUBIC);
 	cv::Mat1f weighed_magnitude = magnitude.mul(kernel);
 
 	double wmmax;
@@ -342,13 +362,15 @@ int main(int argc, char ** argv)
 		return result;
 	};
 
-	cv::Mat1d filtered_rads_final, rads;
+	cv::Mat1d filtered_rads_final, rads, areas;
 	{ // Pre-compute landmarks
 		std::vector<std::vector<cv::Vec3d>> points3d(patient_data.sax_seqs[0].slices.size());
 		std::cout << "Computing landmarks locations.. " << std::endl;
 
 		//cv::Mat1d 
 		rads = cv::Mat1d(patient_data.sax_seqs.size(), patient_data.sax_seqs[0].slices.size(), 0.);
+		areas = cv::Mat1d(patient_data.sax_seqs.size(), patient_data.sax_seqs[0].slices.size(), 0.);
+
 		int i{};
 		for (Sequence& seq : patient_data.sax_seqs) {
 			int j{};
@@ -429,12 +451,60 @@ int main(int argc, char ** argv)
 				cv::Mat1d current_shape = lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, cpr_repeats) : cv::Mat1d::zeros(1, landmark_num);
 
 				cur_slice.aux["landmarks"] = current_shape;
+				cur_slice.aux["landmarks_area"] = cv::Mat1d(1, 1, compute_polyon_area(shape2polygon(current_shape, cur_slice.pixel_spacing)));
+				areas(i, j) = cur_slice.aux["landmarks_area"].at<double>(0);
 				j++;
 			}
 			i++;
 		}
 
 		std::cout << std::endl;
+	}
+	{
+
+		visualize_mat(areas, "areas", 32);
+		cv::Mat1d areasf, areas_high;
+		cv::hconcat(std::vector<cv::Mat1d>{3, areas}, areasf);
+		for (size_t r{}; r < areasf.rows; ++r) {
+			cv::Mat1f row;
+			areasf.row(r).convertTo(row, row.type());
+			cv::medianBlur(row, row, 5);
+			row.convertTo(areasf.row(r), areasf.type());
+		}
+		areasf = areasf(cv::Rect(cv::Point(areas.cols, 0), areas.size()));
+
+		//for (size_t c{}; c < areas.cols; ++c) {
+		//	for (int r{ areas.rows / 2 }; r > 0; --r) {
+		//
+		//	}
+		//	int diff = 1;
+		//	for (int r{ areas.rows / 2 }; r < areas.rows - 1; ++r) {
+		//		if (areas(r, c) < 10 * areas(r + diff, c)) {
+		//			areas(r + diff, c) = -1;
+		//			diff++; r--;
+		//		}
+		//	}
+		//}
+
+		for (int slice = 0; slice < patient_data.sax_seqs[0].slices.size(); slice++) {
+			for (int s = 0; s < patient_data.sax_seqs.size(); s++) {
+				const Slice& cur_slice = patient_data.sax_seqs[s].slices[slice];
+				const cv::Mat1d current_shape = cur_slice.aux["landmarks"];
+				const cv::Mat1d current_shape = patient_data.sax_seqs[s].slices[slice_id].aux["landmarks"];
+				const cv::Mat1d current_shape = patient_data.sax_seqs[s].slices[slice_id].aux["landmarks"];
+				std::vector<cv::Point> contour;
+				for (int i = 0; i < landmark_num; i++) {
+					contour.push_back(cv::Point2d(current_shape(i, 0), current_shape(i, 1)));
+				}
+				cv::drawContours(cur_image, std::vector<std::vector<cv::Point>>{1, contour }, -1, cv::Scalar(0, 0, 255), 1);
+			}
+		}
+
+		visualize_mat(areasf, "areas_filtered", 32);
+		cv::Mat1d col_sums;
+		cv::reduce(areasf, col_sums, 0, cv::REDUCE_SUM);
+		cv::GaussianBlur(col_sums, col_sums, cv::Size(3, 3), -1);
+		visualize_mat(col_sums, "col_sums", 32);
 	}
 	if (save_landmarks) {
 		std::string lms_savepath_2d = data_path + "/" + input_patient + "/landmarks_2d.pts";
@@ -459,8 +529,6 @@ int main(int argc, char ** argv)
 	if (!show_windows)
 		return EXIT_SUCCESS;
 
-	bool rtype = true;
-
 	while (key != 'q') {
 		const int prev_sax_id = sax_id;
 		const int prev_slice_id = slice_id;
@@ -473,7 +541,6 @@ int main(int argc, char ** argv)
 			case Right: slice_id = (slice_id + 1) % sequence_len; break;
 			case DecSP: superpixel_num = std::max(50, superpixel_num - 25); break;
 			case IncSP: superpixel_num = std::min(250, superpixel_num + 25); break;
-			case SwitchRType: rtype = !rtype; break;
 			case 'c': save_contours = true;
 			default: break;
 		}
@@ -509,9 +576,10 @@ int main(int argc, char ** argv)
 
 		cv::Mat1f imagef;
 		cur_image.convertTo(imagef, imagef.type());
+#if 0
 		double R = get_circle_for_point(imagef, cur_slice.estimated_center);
 		R = rtype ? rads(sax_id, slice_id) : filtered_rads_final(sax_id, slice_id);
-	
+		
 		BoundingBox lv_bbox;
 		lv_bbox.start_x = cur_slice.estimated_center.x - R * 1.1;
 		lv_bbox.start_y = cur_slice.estimated_center.y - R * 1.1;
@@ -519,40 +587,37 @@ int main(int argc, char ** argv)
 		lv_bbox.height = 2 * R * 1.1;
 		lv_bbox.centroid_x = lv_bbox.start_x + lv_bbox.width / 2.0;
 		lv_bbox.centroid_y = lv_bbox.start_y + lv_bbox.height / 2.0;
-
 		cv::Mat1b cur_image1b;
 		imagef.convertTo(cur_image1b, cur_image1b.type(), 255);
-		//cv::Mat1d current_shape = cur_slice.aux["landmarks"];
 		cv::Mat1d current_shape = lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, cpr_repeats) : cv::Mat1d::zeros(1, landmark_num);
+#else
+		// Use precomputed contours
+		cv::Mat1d current_shape = cur_slice.aux["landmarks"];
+#endif
 		
 		std::cout
 			<< "Area: " << compute_polyon_area(shape2polygon(current_shape, cur_slice.pixel_spacing)) << '\t'
 			<< "Dist: " << cur_slice.distance_from_point(prev_sax.position) << '\t'
-			<< "Rad:  " << (rtype ? "norm" : "filtered") << '\t'
 			<< std::endl;
-
-		//double roi_sz = 0.2 * cur_slice.image.cols;
-		//cv::Rect roi(inter.p_sax - cv::Point2d{ roi_sz, roi_sz }, inter.p_sax + cv::Point2d{ roi_sz, roi_sz });
-		//roi = roi & cv::Rect({ 0, 0 }, cur_image.size());
 
 		// Drawing
 		{
 			const double max = 1;
 
-			const auto draw_line = [] (cv::Mat& image, const Slice& slice, const line_eq_t& line, cv::Scalar color) {
+			const auto draw_line = [] (cv::Mat& image, const Slice& slice, const line_eq_t& line, cv::Scalar color, double scale, size_t width) {
 				const cv::Point2d p1 = slice.point_to_image(line(-1000));
 				const cv::Point2d p2 = slice.point_to_image(line(1000));
-				cv::line(image, p1, p2, color, 1);
+				cv::line(image, p1*scale, p2*scale, color, width);
 			};
 
-			const double scale = 256. / cur_image.cols;
+			const double scale = 384. / cur_image.cols;
 
 			cur_image.convertTo(cur_image, CV_32FC1);
 			cv::cvtColor(cur_image, cur_image, cv::COLOR_GRAY2BGR);
 			if (!ch2_slice.empty && !ch4_slice.empty) {
 				const Intersection& inter = patient_data.sax_seqs[sax_id].intersection;
-				draw_line(cur_image, cur_slice, inter.ls2, cv::Scalar(max, 0, 0));
-				draw_line(cur_image, cur_slice, inter.ls4, cv::Scalar(max, 0, 0));
+				draw_line(cur_image, cur_slice, inter.ls2, cv::Scalar(max, 0, 0), 1, 1);
+				draw_line(cur_image, cur_slice, inter.ls4, cv::Scalar(max, 0, 0), 1, 1);
 				cv::circle(cur_image, inter.p_sax, 2, cv::Scalar(0., 0., max), -1);
 			}
 			cv::resize(cur_image, cur_image, cv::Size(0, 0), scale, scale, CV_INTER_LANCZOS4);
@@ -563,27 +628,51 @@ int main(int argc, char ** argv)
 			for (int i = 0; i < landmark_num; i++) {
 				cv::circle(cur_image, cv::Point2d(current_shape(i, 0), current_shape(i, 1)) * scale, 1, cv::Scalar(0, 0, 255), -1, 8, 0);
 			}
+
 			cv::circle(cur_image, cur_slice.estimated_center * scale, 3, cv::Scalar(255, 0, 255), -1, 8, 0);
 			cv::imshow("cur_slice", cur_image);
 
 			if (!ch2_slice.empty && !ch4_slice.empty) {
+
 				const Intersection& inter = patient_data.sax_seqs[sax_id].intersection;
 				cv::Mat ch2_image = ch2_slice.image.clone();
+				const double scale_ch2 = 384. / ch2_image.cols;
+
 				ch2_image.convertTo(ch2_image, CV_32FC1);
 				cv::cvtColor(ch2_image, ch2_image, cv::COLOR_GRAY2BGR);
-				draw_line(ch2_image, ch2_slice, inter.l24, cv::Scalar(0, max, 0));
-				draw_line(ch2_image, ch2_slice, inter.ls2, cv::Scalar(max, 0, 0));
+				draw_line(ch2_image, ch2_slice, inter.l24, cv::Scalar(0, max, 0), 1, 2);
+				draw_line(ch2_image, ch2_slice, inter.ls2, cv::Scalar(max, 0, 0), 1, 2);
 				cv::circle(ch2_image, inter.p_ch2, 2, cv::Scalar(0., 0., max), -1);
-				cv::resize(ch2_image, ch2_image, cv::Size(0, 0), scale, scale, CV_INTER_LANCZOS4);
+
+
+				cv::resize(ch2_image, ch2_image, cv::Size(0, 0), scale_ch2, scale_ch2, CV_INTER_LANCZOS4);
+
+
+				for (int i = 0; i < patient_data.sax_seqs.size(); i++) {
+					draw_line(ch2_image, ch2_slice, patient_data.sax_seqs[i].intersection.ls2, cv::Scalar(max*0.35, 0, 0), scale_ch2, 1);
+					cv::Vec3d estimated_3d = patient_data.sax_seqs[i].point_to_3d(patient_data.sax_seqs[i].slices[slice_id].estimated_center);
+					cv::circle(ch2_image, patient_data.ch2_seq.point_to_image(estimated_3d) * scale_ch2, 2, cv::Scalar(max, 0, max), -1, 8, 0);
+				}
+
 				cv::imshow("ch2", ch2_image);
 
 				cv::Mat ch4_image = ch4_slice.image.clone();
+				const double scale_ch4 = 384. / ch4_image.cols;
+
 				ch4_image.convertTo(ch4_image, CV_32FC1);
 				cv::cvtColor(ch4_image, ch4_image, cv::COLOR_GRAY2BGR);
-				draw_line(ch4_image, ch4_slice, inter.l24, cv::Scalar(0, max, 0));
-				draw_line(ch4_image, ch4_slice, inter.ls4, cv::Scalar(max, 0, 0));
+				draw_line(ch4_image, ch4_slice, inter.l24, cv::Scalar(0, max, 0), 1, 2);
+				draw_line(ch4_image, ch4_slice, inter.ls4, cv::Scalar(max, 0, 0), 1, 2);
 				cv::circle(ch4_image, inter.p_ch4, 2, cv::Scalar(0., 0., max), -1);
-				cv::resize(ch4_image, ch4_image, cv::Size(0, 0), scale, scale, CV_INTER_LANCZOS4);
+				cv::resize(ch4_image, ch4_image, cv::Size(0, 0), scale_ch4, scale_ch4, CV_INTER_LANCZOS4);
+
+				for (int i = 0; i < patient_data.sax_seqs.size(); i++) {
+					draw_line(ch4_image, ch4_slice, patient_data.sax_seqs[i].intersection.ls4, cv::Scalar(max*0.35, 0, 0), scale_ch4, 1);
+					cv::Vec3d estimated_3d = patient_data.sax_seqs[i].point_to_3d(patient_data.sax_seqs[i].slices[slice_id].estimated_center);
+					cv::circle(ch4_image, patient_data.ch4_seq.point_to_image(estimated_3d) * scale_ch4, 2, cv::Scalar(max, 0, max), -1, 8, 0);
+			}
+
+
 				cv::imshow("ch4", ch4_image);
 			}
 			cv::imwrite("tmp/slice_" + std::to_string(sax_id) + "_frame_" + std::to_string(slice_id) + ".png", 255*cur_image);

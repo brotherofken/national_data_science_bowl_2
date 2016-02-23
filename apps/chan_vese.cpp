@@ -258,9 +258,6 @@ int main(int argc, char ** argv)
 	cv::Mat1d img = sax.slices[11].image;
 	std::string input_filename = sax.slices[0].filename;
 
-	std::pair <double, double> min_max = patient_data.get_min_max_bp_level();
-	std::cout << "min_max: " << min_max.first << " " << min_max.second << std::endl;
-
 	int sax_id = 0;
 	int slice_id = 0;
 	int key = 0;
@@ -289,7 +286,7 @@ int main(int argc, char ** argv)
 		Slice& cur_slice = patient_data.sax_seqs[sax_id].slices[slice_id];
 		Slice& ch2_slice = patient_data.ch2_seq.slices[slice_id];
 		Slice& ch4_slice = patient_data.ch4_seq.slices[slice_id];
-		const PatientData::Intersection& inter = patient_data.intersections[sax_id];
+		const Intersection& inter = patient_data.sax_seqs[sax_id].intersection;
 
 		if (sax_id != prev_sax_id || slice_id != prev_slice_id) {
 			// save mask

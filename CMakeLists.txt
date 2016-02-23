@@ -67,6 +67,8 @@ add_subdirectory(libs/slic)
 add_subdirectory(libs/mrf)
 add_subdirectory(libs/opencv)
 add_subdirectory(libs/chan_vese)
+
+
 #add_subdirectory(chan_vese_segmentation)
 
 macro(set_directory ttarget tdir)

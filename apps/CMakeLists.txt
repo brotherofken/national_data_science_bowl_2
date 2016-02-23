@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8.11)
 
 function(add_application_target name sources headers)
 	add_executable(${name} ${name}.cpp ${sources} ${headers})
-	include_directories(${OpenCV_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/libs ${GDCM_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS})
+	include_directories(${OpenCV_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/libs ${PROJECT_SOURCE_DIR}/elibs/eigen ${GDCM_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS})
 	link_directories(${GDCM_LIBRARY_DIRS})
 
 	if(MSVC)

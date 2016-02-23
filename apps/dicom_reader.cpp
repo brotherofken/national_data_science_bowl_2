@@ -10,6 +10,7 @@
 
 #include <numeric>
 #include <algorithm>
+#include <unordered_map>
 
 const std::string PatientData::AUX_LV_MASK = "lv_mask";
 const std::string PatientData::AUX_CONTOUR = "lv_annotation";
@@ -155,14 +156,9 @@ Slice::Slice(const std::string& filename)
 
 		const unsigned int size_x = gimage.GetDimensions()[0];
 		const unsigned int size_y = gimage.GetDimensions()[1];
-		cv::Mat1d imaged = cv::Mat1d(size_y, size_x);
-		std::copy(vbuffer.begin(), vbuffer.end(), imaged.begin());
+		image = cv::Mat1d(size_y, size_x);
+		std::copy(vbuffer.begin(), vbuffer.end(), image.begin());
 
-		cv::Mat hist;
-		const auto minmax = get_quantile_uchar(imaged, hist, 0.1, 0.95);
-		imaged = (imaged - minmax.first) / (minmax.second - minmax.first);
-		imaged.setTo(1, imaged > 1.0);
-		image = imaged;
 		//imaged.convertTo(image, image.type(), 255);
 		//test_images.push_back(image);
 
@@ -194,14 +190,15 @@ Slice::Slice(const std::string& filename)
 		sf.SetFile(reader.GetFile());
 		std::pair<std::string, std::string> slice_location_p = sf.ToStringPair(gdcm::Tag(0x0020, 0x1041));
 		std::pair<std::string, std::string> slice_thickness_p = sf.ToStringPair(gdcm::Tag(0x0018, 0x0050));
-
+		std::pair<std::string, std::string> acquisition_time_p = sf.ToStringPair(gdcm::Tag(0x0008, 0x0031));
+		
 #if 0 && defined(_DEBUG)
 		std::cout << "File meta: " << filename << std::endl;
 		std::cout << slice_location_p.first << " " << slice_location_p.second << std::endl;
 		std::cout << slice_thickness_p.first << " " << slice_thickness_p.second << std::endl;
 #endif
 
-
+		acquisition_time = std::stod(acquisition_time_p.second);
 		slice_location = std::stod(slice_location_p.second);
 		slice_thickness = std::stod(slice_thickness_p.second);
 	}
@@ -260,6 +257,7 @@ PatientData::PatientData(const std::string& data_path, const std::string& direct
 
 	for (const auto& dir : slice_directories) {
 		const Sequence s((sequences_location / dir).string());
+		if (s.slices.size() == 0) continue;
 		assert(s.rm.cols == 3 && s.rm.rows == 3);
 
 		if (s.slices.size() && s.slices.size() <= 30) {
@@ -279,63 +277,77 @@ PatientData::PatientData(const std::string& data_path, const std::string& direct
 		}
 	}
 
-	// Median filtering of point locations
-	for (Sequence& sax : sax_seqs) {
-		for (int i{}; i < sax.slices.size(); ++i) {
-			std::vector<cv::Point> points = {
-				sax.slices[i - 1 < 0 ? (sax.slices.size() - 1) : (i - 1)].estimated_center, 
-				sax.slices[i].estimated_center,
-				sax.slices[(i + 1) % sax.slices.size()].estimated_center
+	const bool chamber_views_ok = !ch2_seq.empty && !ch4_seq.empty;
+
+	// Fill intersections
+	if (chamber_views_ok) {
+		for (Sequence& sax : sax_seqs) {
+			const cv::Vec3d point_3d = slices_intersection(sax, ch2_seq, ch4_seq);
+			sax.intersection = { slices_intersection(ch2_seq, ch4_seq), slices_intersection(sax, ch2_seq), slices_intersection(sax, ch4_seq),
+				point_3d,
+				sax.point_to_image(point_3d), ch2_seq.point_to_image(point_3d), ch4_seq.point_to_image(point_3d)
 			};
-			const auto median = [](double a, double b, double c) {return std::max(std::min(a, b), std::min(std::max(a, b), c)); };
-			sax.slices[i].estimated_center.x = median(points[0].x, points[1].x, points[2].x);
-			sax.slices[i].estimated_center.y = median(points[0].y, points[1].y, points[2].y);
 		}
 	}
 
-	const bool chamber_views_ok = !ch2_seq.empty && !ch4_seq.empty;
-
-
-	if (chamber_views_ok)
+	// Remove duplicated slices
+	const auto compare_vec3i = [](const cv::Vec3i& a) -> bool {
+		return std::hash<int>()(a[0]) + std::hash<int>()(a[1]) + std::hash<int>()(a[2]);
+	};
+	std::unordered_map<cv::Vec3i, Sequence, std::function<size_t(cv::Vec3i)>> uniq_slices(1000, compare_vec3i);
 	for (Sequence& sax : sax_seqs) {
-		const cv::Vec3d point_3d = slices_intersection(sax, ch2_seq, ch4_seq);
-		sax.intersection = {slices_intersection(ch2_seq, ch4_seq), slices_intersection(sax, ch2_seq), slices_intersection(sax, ch4_seq),
-			point_3d,
-			sax.point_to_image(point_3d), ch2_seq.point_to_image(point_3d), ch4_seq.point_to_image(point_3d)
-		};
+		const cv::Vec3i point = chamber_views_ok ? cv::Vec3i(sax.intersection.p) : cv::Vec3i(sax.position);
+		if (uniq_slices.count(point)) {
+			if (uniq_slices[point].slices[0].acquisition_time < sax.slices[0].acquisition_time) {
+				uniq_slices[point] = sax;
+			}
+		}
+		else {
+			uniq_slices[point] = sax;
+		}
 	}
-	std::sort(sax_seqs.begin(), sax_seqs.end(), [](Sequence& a, Sequence& b) { return a.intersection.p[1] > b.intersection.p[1]; });
-}
+	sax_seqs.clear();
+	for (auto sax : uniq_slices) {
+		sax_seqs.push_back(sax.second);
+	}
 
-std::pair<double, double> PatientData::get_min_max_bp_level() const
-{
-//	const auto accumulate_ = [=](size_t i, double& value, std::function<double(double, double)> reduce_) {
-//		for (size_t j{}; j < ch2_seq.slices.size(); ++j) {
-//			if (cv::Rect(cv::Point{ 0, 0 }, ch2_seq.slices[j].image.size()).contains(sax_seqs[i].intersection.p_ch2))
-//				value = reduce_(value, ch2_seq.slices[j].image(sax_seqs[i].intersection.p_ch2));// cv::mean(ch2_seq.slices[j].image(cv::Rect(intersections[i].p_ch2 - cv::Point2d{ 1,1 }, intersections[i].p_ch2 + cv::Point2d{ 1,1 })))[0]);
-//		}
-//		for (size_t j{}; j < ch4_seq.slices.size(); ++j) {
-//			if (cv::Rect(cv::Point{ 0, 0 }, ch4_seq.slices[j].image.size()).contains(sax_seqs[i].intersection.p_ch4))
-//				value = reduce_(value, ch4_seq.slices[j].image(sax_seqs[i].intersection.p_ch4));//cv::mean(ch4_seq.slices[j].image(cv::Rect(intersections[i].p_ch4 - cv::Point2d{ 1,1 }, intersections[i].p_ch4 + cv::Point2d{ 1,1 })))[0]);
-//		}
-//		const auto& s = sax_seqs[i];
-//		for (size_t j{}; j < s.slices.size(); ++j) {
-//			if (cv::Rect(cv::Point{ 0, 0 }, s.slices[j].image.size()).contains(s[i].p_sax))
-//				value = reduce_(value, s.slices[j].image(s[i].p_sax)); // cv::mean(s.slices[j].image(cv::Rect(intersections[i].p_sax - cv::Point2d{ 1,1 }, intersections[i].p_sax + cv::Point2d{ 1,1 })))[0]);
-//		}
-//	};
-//
-//	double minv = std::numeric_limits<double>::max();
-//	double maxv = std::numeric_limits<double>::min();
-//
-//	for (size_t i{}; i < sax_seqs.size(); ++i) {
-//		accumulate_(i, minv, [](double v1, double v2) {return std::min(v1, v2); });
-//		accumulate_(i, maxv, [](double v1, double v2) {return std::max(v1, v2); });
-//	}
-//
-//
-	throw "Not implemented";
-	return std::pair<double, double>(0,0);
+	// Sort saxes
+	if (chamber_views_ok) {
+		// By Y coordinate of slices intersection
+		std::sort(sax_seqs.begin(), sax_seqs.end(), [](Sequence& a, Sequence& b) { return a.intersection.p[1] > b.intersection.p[1]; });
+	} else {
+		// By Y of sax position
+		std::sort(sax_seqs.begin(), sax_seqs.end(), [](Sequence& a, Sequence& b) { return a.position[1] > b.position[1]; });
+	}
+
+	// TODO: Remove duplicated code
+	for (Sequence& sax : sax_seqs) {
+		for (Slice& s : sax.slices) {
+			cv::Mat hist;
+			const double min_size = std::min(s.image.cols, s.image.rows);
+			cv::Rect roi(s.estimated_center, cv::Size(0.2*min_size, 0.2*min_size));
+			roi = roi & cv::Rect({ 0,0 }, s.image.size());
+			const auto minmax = get_quantile_uchar(s.image(roi), hist, 0.05, 0.95);
+			s.image = (s.image - minmax.first) / (minmax.second - minmax.first);
+			s.image.setTo(1, s.image > 1.0);
+		}
+	}
+
+	for (Slice& s : ch2_seq.slices) {
+		cv::Mat hist;
+		const auto minmax = get_quantile_uchar(s.image, hist, 0.1, 0.95);
+		s.image = (s.image - minmax.first) / (minmax.second - minmax.first);
+		s.image.setTo(1, s.image > 1.0);
+	}
+
+	for (Slice& s : ch4_seq.slices) {
+		cv::Mat hist;
+		const auto minmax = get_quantile_uchar(s.image, hist, 0.1, 0.95);
+		s.image = (s.image - minmax.first) / (minmax.second - minmax.first);
+		s.image.setTo(1, s.image > 1.0);
+	}
+
+
 }
 
 
