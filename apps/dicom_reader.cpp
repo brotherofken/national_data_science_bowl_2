@@ -330,6 +330,7 @@ PatientData::PatientData(const std::string& data_path, const std::string& direct
 			const auto minmax = get_quantile_uchar(s.image(roi), hist, 0.05, 0.95);
 			s.image = (s.image - minmax.first) / (minmax.second - minmax.first);
 			s.image.setTo(1, s.image > 1.0);
+			s.image.setTo(0, s.image < 0.0);
 		}
 	}
 

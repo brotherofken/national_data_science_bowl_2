@@ -201,27 +201,41 @@ void ShapeRegressor::Read(std::istream& fin)
 }
 
 
-Mat_<double> ShapeRegressor::Predict(const Mat_<uchar>& image, const BoundingBox& bounding_box, int initial_num){
-    // generate multiple initializations
-    Mat_<double> result = Mat::zeros(landmark_num_,2, CV_64FC1);
-    RNG random_generator(getTickCount());
-    for(int i = 0;i < initial_num;i++){
-        random_generator = RNG(i);
-        int index = random_generator.uniform(0,training_shapes_.size());
-        Mat_<double> current_shape = training_shapes_[index];
-        BoundingBox current_bounding_box = bounding_box_[index];
-        current_shape = ProjectShape(current_shape,current_bounding_box);
-        current_shape = ReProjectShape(current_shape,bounding_box);
-        for(int j = 0;j < first_level_num_;j++){
-            Mat_<double> prediction = fern_cascades_[j].Predict(image,bounding_box,mean_shape_,current_shape);
-            // update current shape
-            current_shape = prediction + ProjectShape(current_shape,bounding_box);
-            current_shape = ReProjectShape(current_shape,bounding_box); 
-        }
-        result = result + current_shape; 
-    }    
+Mat1d ShapeRegressor::Predict(const Mat1b& image, const BoundingBox& bounding_box, int initial_num, const cv::Mat1d& initial_contour)
+{
+	// generate multiple initializations
+	Mat1d result = Mat::zeros(landmark_num_, 2, CV_64FC1);
+	RNG random_generator(getTickCount());
 
-    return 1.0 / initial_num * result;
+	//if (!initial_contour.empty()) initial_num = 1;
+
+	for (int i = 0; i < initial_num; i++) {
+		random_generator = RNG(i);
+		//int index = random_generator.uniform(0, training_shapes_.size());
+		Mat1d current_shape;
+		current_shape = mean_shape_.clone();
+		if (i != 0) {
+			for (size_t r{}; r < current_shape.rows; ++r) {
+				for (size_t c{}; c < current_shape.cols; ++c) {
+					current_shape(r, c) += random_generator.uniform(-0.125, 0.125); // Random jiggling
+				}
+			}
+		}
+		
+		//BoundingBox current_bounding_box = bounding_box_[index];
+		//if (i != 0) current_shape = ProjectShape(current_shape, bounding_box);// current_bounding_box);
+		current_shape = ReProjectShape(current_shape, bounding_box);
+
+		for (int j = 0; j < first_level_num_; j++) {
+			Mat1d prediction = fern_cascades_[j].Predict(image, bounding_box, mean_shape_, current_shape);
+			// update current shape
+			current_shape = prediction + ProjectShape(current_shape, bounding_box);
+			current_shape = ReProjectShape(current_shape, bounding_box);
+		}
+		result = result + current_shape;
+	}
+
+	return 1.0 / initial_num * result;
 }
 
 void ShapeRegressor::Load(string path){

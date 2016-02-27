@@ -159,7 +159,7 @@ class ShapeRegressor{
                    int first_level_num, int second_level_num,
                    int candidate_pixel_num, int fern_pixel_num,
                    int initial_num);
-        cv::Mat_<double> Predict(const cv::Mat_<uchar>& image, const BoundingBox& bounding_box, int initial_num);
+        cv::Mat_<double> Predict(const cv::Mat_<uchar>& image, const BoundingBox& bounding_box, int initial_num, const cv::Mat1d& initial_contour = cv::Mat1d());
         void Read(std::istream& fin);
         void Write(std::ostream& fout);
         void Load(std::string path);
