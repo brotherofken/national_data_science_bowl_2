@@ -448,6 +448,9 @@ int main(int argc, char ** argv)
 
 				cv::Mat1b cur_image1b;
 				cur_image.convertTo(cur_image1b, cur_image1b.type(), 255);
+				//int prev_slice_id = ((j - 1) < 0 ? seq.slices.size() : j) - 1;
+				//Slice& prev_slice = seq.slices[prev_slice_id];
+				//cv::Mat1d initial_shape = cv::Mat1d();// prev_slice.aux.count("landmarks") > 0 ? prev_slice.aux["landmarks"] : cv::Mat1d();
 				cv::Mat1d current_shape = lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, cpr_repeats) : cv::Mat1d::zeros(1, landmark_num);
 
 				cur_slice.aux["landmarks"] = current_shape;
@@ -460,6 +463,7 @@ int main(int argc, char ** argv)
 
 		std::cout << std::endl;
 	}
+#if 0
 	{
 
 		visualize_mat(areas, "areas", 32);
@@ -486,19 +490,19 @@ int main(int argc, char ** argv)
 		//	}
 		//}
 
-		for (int slice = 0; slice < patient_data.sax_seqs[0].slices.size(); slice++) {
-			for (int s = 0; s < patient_data.sax_seqs.size(); s++) {
-				const Slice& cur_slice = patient_data.sax_seqs[s].slices[slice];
-				const cv::Mat1d current_shape = cur_slice.aux["landmarks"];
-				const cv::Mat1d current_shape = patient_data.sax_seqs[s].slices[slice_id].aux["landmarks"];
-				const cv::Mat1d current_shape = patient_data.sax_seqs[s].slices[slice_id].aux["landmarks"];
-				std::vector<cv::Point> contour;
-				for (int i = 0; i < landmark_num; i++) {
-					contour.push_back(cv::Point2d(current_shape(i, 0), current_shape(i, 1)));
-				}
-				cv::drawContours(cur_image, std::vector<std::vector<cv::Point>>{1, contour }, -1, cv::Scalar(0, 0, 255), 1);
-			}
-		}
+		//for (int slice = 0; slice < patient_data.sax_seqs[0].slices.size(); slice++) {
+		//	for (int s = 0; s < patient_data.sax_seqs.size(); s++) {
+		//		const Slice& cur_slice = patient_data.sax_seqs[s].slices[slice];
+		//		const cv::Mat1d current_shape = cur_slice.aux["landmarks"];
+		//		const cv::Mat1d current_shape = patient_data.sax_seqs[s].slices[slice_id].aux["landmarks"];
+		//		const cv::Mat1d current_shape = patient_data.sax_seqs[s].slices[slice_id].aux["landmarks"];
+		//		std::vector<cv::Point> contour;
+		//		for (int i = 0; i < landmark_num; i++) {
+		//			contour.push_back(cv::Point2d(current_shape(i, 0), current_shape(i, 1)));
+		//		}
+		//		cv::drawContours(cur_image, std::vector<std::vector<cv::Point>>{1, contour }, -1, cv::Scalar(0, 0, 255), 1);
+		//	}
+		//}
 
 		visualize_mat(areasf, "areas_filtered", 32);
 		cv::Mat1d col_sums;
@@ -506,6 +510,7 @@ int main(int argc, char ** argv)
 		cv::GaussianBlur(col_sums, col_sums, cv::Size(3, 3), -1);
 		visualize_mat(col_sums, "col_sums", 32);
 	}
+#endif
 	if (save_landmarks) {
 		std::string lms_savepath_2d = data_path + "/" + input_patient + "/landmarks_2d.pts";
 		std::string lms_savepath_3d = data_path + "/" + input_patient + "/landmarks_3d.pts";
@@ -523,7 +528,16 @@ int main(int argc, char ** argv)
 				}
 			}
 		}
-		
+		std::string lms_savepath_areas = data_path + "/" + input_patient + "/contour_areas.csv";
+		std::ofstream fout_area(lms_savepath_areas);
+		for (Sequence& seq : patient_data.sax_seqs) {
+			fout_area << seq.name;
+			for (Slice& cur_slice : seq.slices) {
+				const double area = cur_slice.aux["landmarks_area"].at<double>(0,0);
+				fout_area << "\t" << area;
+			}
+			fout_area << std::endl;
+		}
 	}
 
 	if (!show_windows)
@@ -576,8 +590,8 @@ int main(int argc, char ** argv)
 
 		cv::Mat1f imagef;
 		cur_image.convertTo(imagef, imagef.type());
-#if 0
 		double R = get_circle_for_point(imagef, cur_slice.estimated_center);
+#if 0
 		R = rtype ? rads(sax_id, slice_id) : filtered_rads_final(sax_id, slice_id);
 		
 		BoundingBox lv_bbox;
@@ -670,7 +684,7 @@ int main(int argc, char ** argv)
 					draw_line(ch4_image, ch4_slice, patient_data.sax_seqs[i].intersection.ls4, cv::Scalar(max*0.35, 0, 0), scale_ch4, 1);
 					cv::Vec3d estimated_3d = patient_data.sax_seqs[i].point_to_3d(patient_data.sax_seqs[i].slices[slice_id].estimated_center);
 					cv::circle(ch4_image, patient_data.ch4_seq.point_to_image(estimated_3d) * scale_ch4, 2, cv::Scalar(max, 0, max), -1, 8, 0);
-			}
+				}
 
 
 				cv::imshow("ch4", ch4_image);
