@@ -8,27 +8,27 @@
 
 #include <time.h>
 
-using namespace cv;
-using namespace cv::ml;
-using namespace std;
+//using namespace cv;
+//using namespace cv::ml;
+//using namespace std;
 
-void get_svm_detector(const Ptr<SVM>& svm, vector< float > & hog_detector);
+void get_svm_detector(const cv::Ptr<cv::ml::SVM>& svm, std::vector< float > & hog_detector);
 void convert_to_ml(const std::vector< cv::Mat > & train_samples, cv::Mat& trainData);
-void load_images(const string & prefix, const size_t count, vector< Mat > & img_lst);
-void sample_neg(const vector< Mat > & full_neg_lst, vector< Mat > & neg_lst, const Size & size);
-Mat get_hogdescriptor_visu(const Mat& color_origImg, vector<float>& descriptorValues, const Size & size);
-void compute_hog(const vector< Mat > & img_lst, vector< Mat > & gradient_lst, const Size & size);
-void train_svm(const vector< Mat > & gradient_lst, const vector< int > & labels);
-void draw_locations(Mat & img, const vector< Rect > & locations, const Scalar & color);
-void test_it(const Size & size);
+void load_images(const std::string & prefix, const size_t count, std::vector< cv::Mat > & img_lst);
+void sample_neg(const std::vector< cv::Mat > & full_neg_lst, std::vector< cv::Mat > & neg_lst, const cv::Size & size);
+cv::Mat get_hogdescriptor_visu(const cv::Mat& color_origImg, std::vector<float>& descriptorValues, const cv::Size & size);
+void compute_hog(const std::vector< cv::Mat > & img_lst, std::vector< cv::Mat > & gradient_lst, const cv::Size & size);
+void train_svm(const std::vector< cv::Mat > & gradient_lst, const std::vector< int > & labels);
+void draw_locations(cv::Mat & img, const std::vector< cv::Rect > & locations, const cv::Scalar & color);
+void test_it(const cv::Size & size);
 
-void get_svm_detector(const Ptr<SVM>& svm, vector< float > & hog_detector)
+void get_svm_detector(const cv::Ptr<cv::ml::SVM>& svm, std::vector< float > & hog_detector)
 {
 	// get the support vectors
-	Mat sv = svm->getSupportVectors();
+	cv::Mat sv = svm->getSupportVectors();
 	const int sv_total = sv.rows;
 	// get the decision function
-	Mat alpha, svidx;
+	cv::Mat alpha, svidx;
 	double rho = svm->getDecisionFunction(0, alpha, svidx);
 
 	CV_Assert(alpha.total() == 1 && svidx.total() == 1 && sv_total == 1);
@@ -45,7 +45,7 @@ void get_svm_detector(const Ptr<SVM>& svm, vector< float > & hog_detector)
 
 /*
 * Convert training/testing set to be used by OpenCV Machine Learning algorithms.
-* TrainData is a matrix of size (#samples x max(#cols,#rows) per samples), in 32FC1.
+* TrainData is a cv::Matrix of size (#samples x max(#cols,#rows) per samples), in 32FC1.
 * Transposition of samples are made if needed.
 */
 void convert_to_ml(const std::vector< cv::Mat > & train_samples, cv::Mat& trainData)
@@ -55,8 +55,8 @@ void convert_to_ml(const std::vector< cv::Mat > & train_samples, cv::Mat& trainD
 	const int cols = (int)std::max(train_samples[0].cols, train_samples[0].rows);
 	cv::Mat tmp(1, cols, CV_32FC1); //< used for transposition if needed
 	trainData = cv::Mat(rows, cols, CV_32FC1);
-	vector< Mat >::const_iterator itr = train_samples.begin();
-	vector< Mat >::const_iterator end = train_samples.end();
+	std::vector< cv::Mat >::const_iterator itr = train_samples.begin();
+	std::vector< cv::Mat >::const_iterator end = train_samples.end();
 	for (int i = 0; itr != end; ++itr, ++i)
 	{
 		CV_Assert(itr->cols == 1 ||
@@ -73,14 +73,14 @@ void convert_to_ml(const std::vector< cv::Mat > & train_samples, cv::Mat& trainD
 	}
 }
 
-void load_images(const string & prefix, const size_t count, vector< Mat > & img_lst)
+void load_images(const std::string & prefix, const size_t count, std::vector< cv::Mat > & img_lst)
 {
-	string line;
+	std::string line;
 
 	bool end_of_parsing = false;
 	for (size_t i{}; i < count; ++i)
 	{
-		Mat img = imread((prefix + "/" + std::to_string(i) + ".png")); // load the image
+		cv::Mat img = cv::imread((prefix + "/" + std::to_string(i) + ".png")); // load the image
 		if (img.empty()) // invalid image, just skip it.
 			continue;
 #ifdef _DEBUG
@@ -91,9 +91,9 @@ void load_images(const string & prefix, const size_t count, vector< Mat > & img_
 	}
 }
 
-void sample_neg(const vector< Mat > & full_neg_lst, vector< Mat > & neg_lst, const Size & size)
+void sample_neg(const std::vector< cv::Mat > & full_neg_lst, std::vector< cv::Mat > & neg_lst, const cv::Size & size)
 {
-	Rect box;
+	cv::Rect box;
 	box.width = size.width;
 	box.height = size.height;
 
@@ -102,13 +102,13 @@ void sample_neg(const vector< Mat > & full_neg_lst, vector< Mat > & neg_lst, con
 
 	srand((unsigned int)time(NULL));
 
-	vector< Mat >::const_iterator img = full_neg_lst.begin();
-	vector< Mat >::const_iterator end = full_neg_lst.end();
+	std::vector< cv::Mat >::const_iterator img = full_neg_lst.begin();
+	std::vector< cv::Mat >::const_iterator end = full_neg_lst.end();
 	for (; img != end; ++img)
 	{
 		box.x = rand() % (img->cols - size_x);
 		box.y = rand() % (img->rows - size_y);
-		Mat roi = (*img)(box);
+		cv::Mat roi = (*img)(box);
 		neg_lst.push_back(roi.clone());
 #ifdef _DEBUG
 		imshow("img", roi.clone());
@@ -118,13 +118,13 @@ void sample_neg(const vector< Mat > & full_neg_lst, vector< Mat > & neg_lst, con
 }
 
 // From http://www.juergenwiki.de/work/wiki/doku.php?id=public:hog_descriptor_computation_and_visualization
-Mat get_hogdescriptor_visu(const Mat& color_origImg, vector<float>& descriptorValues, const Size & size)
+cv::Mat get_hogdescriptor_visu(const cv::Mat& color_origImg, std::vector<float>& descriptorValues, const cv::Size & size)
 {
 	const int DIMX = size.width;
 	const int DIMY = size.height;
 	float zoomFac = 3;
-	Mat visu;
-	resize(color_origImg, visu, Size((int)(color_origImg.cols*zoomFac), (int)(color_origImg.rows*zoomFac)));
+	cv::Mat visu;
+	resize(color_origImg, visu, cv::Size((int)(color_origImg.cols*zoomFac), (int)(color_origImg.rows*zoomFac)));
 
 	int cellSize = 8;
 	int gradientBinSize = 9;
@@ -226,7 +226,7 @@ Mat get_hogdescriptor_visu(const Mat& color_origImg, vector<float>& descriptorVa
 			int mx = drawX + cellSize / 2;
 			int my = drawY + cellSize / 2;
 
-			rectangle(visu, Point((int)(drawX*zoomFac), (int)(drawY*zoomFac)), Point((int)((drawX + cellSize)*zoomFac), (int)((drawY + cellSize)*zoomFac)), Scalar(100, 100, 100), 1);
+			rectangle(visu, cv::Point((int)(drawX*zoomFac), (int)(drawY*zoomFac)), cv::Point((int)((drawX + cellSize)*zoomFac), (int)((drawY + cellSize)*zoomFac)), cv::Scalar(100, 100, 100), 1);
 
 			// draw in each cell all 9 gradient strengths
 			for (int bin = 0; bin < gradientBinSize; bin++)
@@ -251,7 +251,7 @@ Mat get_hogdescriptor_visu(const Mat& color_origImg, vector<float>& descriptorVa
 				float y2 = my + dirVecY * currentGradStrength * maxVecLen * scale;
 
 				// draw gradient visualization
-				line(visu, Point((int)(x1*zoomFac), (int)(y1*zoomFac)), Point((int)(x2*zoomFac), (int)(y2*zoomFac)), Scalar(0, 255, 0), 1);
+				line(visu, cv::Point((int)(x1*zoomFac), (int)(y1*zoomFac)), cv::Point((int)(x2*zoomFac), (int)(y2*zoomFac)), cv::Scalar(0, 255, 0), 1);
 
 			} // for (all bins)
 
@@ -276,20 +276,20 @@ Mat get_hogdescriptor_visu(const Mat& color_origImg, vector<float>& descriptorVa
 
 } // get_hogdescriptor_visu
 
-void compute_hog(const vector< Mat > & img_lst, vector< Mat > & gradient_lst, const Size & size)
+void compute_hog(const std::vector< cv::Mat > & img_lst, std::vector< cv::Mat > & gradient_lst, const cv::Size & size)
 {
-	HOGDescriptor hog(size, cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, 1, -1.0, HOGDescriptor::L2Hys, 0.1, false, 64, false);
-	Mat gray;
-	vector< Point > location;
-	vector< float > descriptors;
+	cv::HOGDescriptor hog(size, cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, 1, -1.0, cv::HOGDescriptor::L2Hys, 0.1, false, 64, false);
+	cv::Mat gray;
+	std::vector< cv::Point > location;
+	std::vector< float > descriptors;
 
-	vector< Mat >::const_iterator img = img_lst.begin();
-	vector< Mat >::const_iterator end = img_lst.end();
+	std::vector< cv::Mat >::const_iterator img = img_lst.begin();
+	std::vector< cv::Mat >::const_iterator end = img_lst.end();
 	for (; img != end; ++img)
 	{
-		cvtColor(*img, gray, COLOR_BGR2GRAY);
-		hog.compute(gray, descriptors, Size(8, 8), Size(0, 0), location);
-		gradient_lst.push_back(Mat(descriptors).clone());
+		cvtColor(*img, gray, cv::COLOR_BGR2GRAY);
+		hog.compute(gray, descriptors, cv::Size(8, 8), cv::Size(0, 0), location);
+		gradient_lst.push_back(cv::Mat(descriptors).clone());
 #ifdef _DEBUG
 		imshow("gradient", get_hogdescriptor_visu(img->clone(), descriptors, size));
 		waitKey(10);
@@ -297,41 +297,41 @@ void compute_hog(const vector< Mat > & img_lst, vector< Mat > & gradient_lst, co
 	}
 }
 
-void train_svm(const vector< Mat > & gradient_lst, const vector< int > & labels)
+void train_svm(const std::vector< cv::Mat > & gradient_lst, const std::vector< int > & labels)
 {
 
-	Mat train_data;
+	cv::Mat train_data;
 	convert_to_ml(gradient_lst, train_data);
 
-	clog << "Start training...";
-	Ptr<SVM> svm = SVM::create();
+	std::clog << "Start training...";
+	cv::Ptr<cv::ml::SVM> svm = cv::ml::SVM::create();
 	/* Default values to train SVM */
 
 	svm->setCoef0(0.0);
 	svm->setDegree(3);
-	svm->setTermCriteria(TermCriteria(CV_TERMCRIT_ITER + CV_TERMCRIT_EPS, 1000, 1e-3));
+	svm->setTermCriteria(cv::TermCriteria(CV_TERMCRIT_ITER + CV_TERMCRIT_EPS, 1000, 1e-3));
 	svm->setGamma(0);
-	svm->setKernel(SVM::LINEAR);
+	svm->setKernel(cv::ml::SVM::LINEAR);
 	svm->setNu(0.5);
 	svm->setP(0.1); // for EPSILON_SVR, epsilon in loss function?
 	svm->setC(0.001); // From paper, soft classifier
-	svm->setType(SVM::EPS_SVR); // C_SVC; // EPSILON_SVR; // may be also NU_SVR; // do regression task
+	svm->setType(cv::ml::SVM::EPS_SVR); // C_SVC; // EPSILON_SVR; // may be also NU_SVR; // do regression task
 	cv::Mat1d class_weights(1, 2);
 	class_weights(0) = 0.5;
 	class_weights(1) = 1.0;
 	svm->setClassWeights(class_weights);
-	svm->train(train_data, ROW_SAMPLE, Mat(labels));
-	clog << "...[done]" << endl;
+	svm->train(train_data, cv::ml::ROW_SAMPLE, cv::Mat(labels));
+	std::clog << "...[done]" << std::endl;
 
 	svm->save("lv_detector.yml");
 }
 
-void draw_locations(Mat & img, const vector< Rect > & locations, const Scalar & color)
+void draw_locations(cv::Mat & img, const std::vector< cv::Rect > & locations, const cv::Scalar & color)
 {
 	if (!locations.empty())
 	{
-		vector< Rect >::const_iterator loc = locations.begin();
-		vector< Rect >::const_iterator end = locations.end();
+		std::vector< cv::Rect >::const_iterator loc = locations.begin();
+		std::vector< cv::Rect >::const_iterator end = locations.end();
 		for (; loc != end; ++loc)
 		{
 			rectangle(img, *loc, color, 1);
@@ -339,20 +339,21 @@ void draw_locations(Mat & img, const vector< Rect > & locations, const Scalar & 
 	}
 }
 
-void test_it(const Size & size)
+void test_it(const cv::Size & size)
 {
 	char key = 27;
-	Scalar reference(0, 255, 0);
-	Scalar trained(0, 0, 255);
-	Mat img, draw;
-	Ptr<SVM> svm;
-	HOGDescriptor hog(size, cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, 1, -1.0, HOGDescriptor::L2Hys, 0.1, false, 64, false);
-	vector< Rect > locations;
+	cv::Scalar reference(0, 255, 0);
+	cv::Scalar trained(0, 0, 255);
+	cv::Mat img, draw;
+	cv::Ptr<cv::ml::SVM> svm;
+	cv::HOGDescriptor hog(size, cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, 1, -1.0, cv::HOGDescriptor::L2Hys, 0.1, false, 64, false);
+	std::vector< cv::Rect > locations;
 
 	// Load the trained SVM.
-	svm = StatModel::load<SVM>("lv_detector.yml");
+
+	svm = cv::ml::StatModel::load<cv::ml::SVM>("lv_detector.yml");
 	// Set the trained svm to my_hog
-	vector< float > hog_detector;
+	std::vector< float > hog_detector;
 	get_svm_detector(svm, hog_detector);
 	hog.setSVMDetector(hog_detector);
 
@@ -392,7 +393,7 @@ void test_it(const Size & size)
 		draw_locations(draw, locations, trained);
 
 		imshow("Test", draw);
-		key = (char)waitKey(0);
+		key = char(cv::waitKey(0));
 		std::cout << (key == ' ' ? "bad" : "") << std::endl;
 	}
 	fin.close();
@@ -400,42 +401,42 @@ void test_it(const Size & size)
 
 int main(int argc, char** argv)
 {
-	vector<Mat> pos_lst;
-	vector<Mat> full_neg_lst;
-	vector<Mat> neg_lst;
-	vector<Mat> gradient_lst;
-	vector<int> labels;
-	string pos_dir(argv[1]);
+	std::vector<cv::Mat> pos_lst;
+	std::vector<cv::Mat> full_neg_lst;
+	std::vector<cv::Mat> neg_lst;
+	std::vector<cv::Mat> gradient_lst;
+	std::vector<int> labels;
+	std::string pos_dir(argv[1]);
 	size_t pos(std::stoi(argv[2]));
-	string neg_dir(argv[3]);
+	std::string neg_dir(argv[3]);
 	size_t neg(std::stoi(argv[4]));
 
 	if (pos_dir.empty() || pos == 0 || neg_dir.empty() || neg == 0)
 	{
-		cout << "Wrong number of parameters." << endl
-			<< "Usage: " << argv[0] << " --pd=pos_dir -p=pos.lst --nd=neg_dir -n=neg.lst" << endl
-			<< "example: " << argv[0] << " --pd=/INRIA_dataset/ -p=Train/pos.lst --nd=/INRIA_dataset/ -n=Train/neg.lst" << endl;
+		std::cout << "Wrong number of parameters." << std::endl
+			<< "Usage: " << argv[0] << " --pd=pos_dir -p=pos.lst --nd=neg_dir -n=neg.lst" << std::endl
+			<< "example: " << argv[0] << " --pd=/INRIA_dataset/ -p=Train/pos.lst --nd=/INRIA_dataset/ -n=Train/neg.lst" << std::endl;
 		exit(-1);
 	}
 
-	const Size sample_size(32, 32);
+	const cv::Size sample_size(32, 32);
 	bool skip_train = std::stoi(argv[5]);
 	if (!skip_train) {
-		cout << "Loading pos." << endl;
+		std::cout << "Loading pos." << std::endl;
 		load_images(pos_dir, pos, pos_lst);
 		labels.assign(pos_lst.size(), +1);
 		const unsigned int old = (unsigned int)labels.size();
-		cout << "Loading neg." << endl;
+		std::cout << "Loading neg." << std::endl;
 		load_images(neg_dir, neg, neg_lst);
 		//sample_neg(full_neg_lst, neg_lst, sample_size);
 		labels.insert(labels.end(), neg_lst.size(), -1);
 		CV_Assert(old < labels.size());
 
-		cout << "Computing HOG." << endl;
+		std::cout << "Computing HOG." << std::endl;
 		compute_hog(pos_lst, gradient_lst, sample_size);
 		compute_hog(neg_lst, gradient_lst, sample_size);
 
-		cout << "Train svm." << endl;
+		std::cout << "Train svm." << std::endl;
 		train_svm(gradient_lst, labels);
 	}
 
