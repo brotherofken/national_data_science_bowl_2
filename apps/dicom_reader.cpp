@@ -325,9 +325,9 @@ PatientData::PatientData(const std::string& data_path, const std::string& direct
 		for (Slice& s : sax.slices) {
 			cv::Mat hist;
 			const double min_size = std::min(s.image.cols, s.image.rows);
-			cv::Rect roi(s.estimated_center, cv::Size(0.2*min_size, 0.2*min_size));
+			cv::Rect roi(s.estimated_center - cv::Point(0.2*min_size, 0.2*min_size), cv::Size(0.4*min_size, 0.4*min_size));
 			roi = roi & cv::Rect({ 0,0 }, s.image.size());
-			const auto minmax = get_quantile_uchar(s.image(roi), hist, 0.05, 0.95);
+			const auto minmax = get_quantile_uchar(s.image(roi), hist, 0.0, 0.9);
 			s.image = (s.image - minmax.first) / (minmax.second - minmax.first);
 			s.image.setTo(1, s.image > 1.0);
 			s.image.setTo(0, s.image < 0.0);
@@ -367,6 +367,20 @@ void PatientData::save_contours() const {
 					out << contour.at<double>(i) << "\t";
 				}
 				out << std::endl;
+			}
+		}
+	}
+}
+
+void PatientData::save_goodness() const {
+	std::string annotation_file_name = this->directory + "_goodness.csv";
+	std::ofstream out(annotation_file_name);
+
+	std::cout << "saving goodness to " + annotation_file_name << std::endl;
+	for (const Sequence& seq : sax_seqs) {
+		for (const Slice& slice : seq.slices) {
+			if (slice.aux.count("GOOD") != 0) {
+				out << slice.filename << "\t" << slice.aux.at("GOOD").at<int>(0) << std::endl;
 			}
 		}
 	}

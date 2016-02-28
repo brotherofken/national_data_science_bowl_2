@@ -106,6 +106,7 @@ struct PatientData
 	std::pair<double, double> get_min_max_bp_level() const;
 
 	void save_contours() const;
+	void save_goodness() const;
 
 	std::string directory;
 	size_t number;

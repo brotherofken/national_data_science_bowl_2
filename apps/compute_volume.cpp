@@ -25,7 +25,7 @@
 #include "slic/slic.h"
 #include "cpr/FaceAlignment.h"
 #include "contour_extraction.hpp"
-#include "hog_lv_detector.hpp"
+//#include "hog_lv_detector.hpp"
 #include "dicom_reader.hpp"
 
 #include "opencv/plot.hpp"
@@ -547,6 +547,8 @@ int main(int argc, char ** argv)
 		const int prev_sax_id = sax_id;
 		const int prev_slice_id = slice_id;
 		bool save_contours = false;
+		bool save_goodness = false;
+		int marker = -1;
 		const size_t sequence_len = patient_data.sax_seqs[sax_id].slices.size();
 		switch (key) {
 			case Down: sax_id = std::max(0, sax_id - 1); break;
@@ -555,10 +557,14 @@ int main(int argc, char ** argv)
 			case Right: slice_id = (slice_id + 1) % sequence_len; break;
 			case DecSP: superpixel_num = std::max(50, superpixel_num - 25); break;
 			case IncSP: superpixel_num = std::min(250, superpixel_num + 25); break;
-			case 'c': save_contours = true;
+			case 'c': save_contours = true; break;
+			case '1': marker = 1; break;
+			case '2': marker = 0; break;
+			case '4': marker = 11; break;
+			case '5': marker = 10; break;
+			case 'g': save_goodness = true; break;
 			default: break;
 		}
-
 
 		// Get data for current slice
 		Slice& prev_sax = patient_data.sax_seqs[prev_sax_id].slices[slice_id];
@@ -566,6 +572,17 @@ int main(int argc, char ** argv)
 		Slice no_slice;
 		Slice& ch2_slice = patient_data.ch2_seq.empty ? no_slice : patient_data.ch2_seq.slices[slice_id];
 		Slice& ch4_slice = patient_data.ch4_seq.empty ? no_slice : patient_data.ch4_seq.slices[slice_id];
+
+		if (marker != -1) {
+			// Mark whole sequence
+			if (marker == 1 || marker == 0) {
+				for (auto& c : patient_data.sax_seqs[sax_id].slices) c.aux["GOOD"] = cv::Mat1i(1,1,marker);
+			}
+			// Mark only current
+			if (marker == 11 || marker == 10) {
+				cur_slice.aux["GOOD"] = cv::Mat1i(1, 1, marker - 10);
+			}
+		}
 
 		if (sax_id != prev_sax_id || slice_id != prev_slice_id) {
 			// save mask
@@ -585,13 +602,17 @@ int main(int argc, char ** argv)
 			patient_data.save_contours();
 		}
 
+		if (save_goodness) {
+			patient_data.save_goodness();
+		}
+
 		cv::Mat cur_image = (cur_slice.image.clone());
 
 
 		cv::Mat1f imagef;
 		cur_image.convertTo(imagef, imagef.type());
-		double R = get_circle_for_point(imagef, cur_slice.estimated_center);
 #if 0
+		double R = get_circle_for_point(imagef, cur_slice.estimated_center);
 		R = rtype ? rads(sax_id, slice_id) : filtered_rads_final(sax_id, slice_id);
 		
 		BoundingBox lv_bbox;
@@ -641,6 +662,10 @@ int main(int argc, char ** argv)
 			cv::putText(cur_image, slice_info, cv::Point(10, 45), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar::all(max));
 			for (int i = 0; i < landmark_num; i++) {
 				cv::circle(cur_image, cv::Point2d(current_shape(i, 0), current_shape(i, 1)) * scale, 1, cv::Scalar(0, 0, 255), -1, 8, 0);
+			}
+
+			if (cur_slice.aux.count("GOOD") != 0) {
+				cv::rectangle(cur_image, cv::Rect({ 0,0 }, cur_image.size()), cur_slice.aux["GOOD"].at<int>(0) == 1 ? cv::Scalar(0, max, 0) : cv::Scalar(0, 0, max), 4);
 			}
 
 			cv::circle(cur_image, cur_slice.estimated_center * scale, 3, cv::Scalar(255, 0, 255), -1, 8, 0);
