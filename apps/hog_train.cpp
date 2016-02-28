@@ -84,8 +84,8 @@ void load_images(const std::string & prefix, const size_t count, std::vector< cv
 		if (img.empty()) // invalid image, just skip it.
 			continue;
 #ifdef _DEBUG
-		imshow("image", img);
-		waitKey(10);
+		cv::imshow("image", img);
+		cv::waitKey(10);
 #endif
 		img_lst.push_back(img.clone());
 	}
@@ -111,8 +111,8 @@ void sample_neg(const std::vector< cv::Mat > & full_neg_lst, std::vector< cv::Ma
 		cv::Mat roi = (*img)(box);
 		neg_lst.push_back(roi.clone());
 #ifdef _DEBUG
-		imshow("img", roi.clone());
-		waitKey(10);
+		cv::imshow("img", roi.clone());
+		cv::waitKey(10);
 #endif
 	}
 }
@@ -280,8 +280,8 @@ void compute_hog(const std::vector< cv::Mat > & img_lst, std::vector< cv::Mat > 
 {
 	cv::HOGDescriptor hog(size, cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, 1, -1.0, cv::HOGDescriptor::L2Hys, 0.1, false, 64, false);
 	cv::Mat gray;
-	std::vector< cv::Point > location;
-	std::vector< float > descriptors;
+	std::vector<cv::Point> location;
+	std::vector<float> descriptors;
 
 	std::vector< cv::Mat >::const_iterator img = img_lst.begin();
 	std::vector< cv::Mat >::const_iterator end = img_lst.end();
@@ -291,8 +291,8 @@ void compute_hog(const std::vector< cv::Mat > & img_lst, std::vector< cv::Mat > 
 		hog.compute(gray, descriptors, cv::Size(8, 8), cv::Size(0, 0), location);
 		gradient_lst.push_back(cv::Mat(descriptors).clone());
 #ifdef _DEBUG
-		imshow("gradient", get_hogdescriptor_visu(img->clone(), descriptors, size));
-		waitKey(10);
+		cv::imshow("gradient", get_hogdescriptor_visu(img->clone(), descriptors, size));
+		cv::waitKey(10);
 #endif
 	}
 }
@@ -300,29 +300,37 @@ void compute_hog(const std::vector< cv::Mat > & img_lst, std::vector< cv::Mat > 
 void train_svm(const std::vector< cv::Mat > & gradient_lst, const std::vector< int > & labels)
 {
 
-	cv::Mat train_data;
-	convert_to_ml(gradient_lst, train_data);
+	cv::Mat train_data_mat;
+	convert_to_ml(gradient_lst, train_data_mat);
 
 	std::clog << "Start training...";
 	cv::Ptr<cv::ml::SVM> svm = cv::ml::SVM::create();
 	/* Default values to train SVM */
 
-	svm->setCoef0(0.0);
-	svm->setDegree(3);
-	svm->setTermCriteria(cv::TermCriteria(CV_TERMCRIT_ITER + CV_TERMCRIT_EPS, 1000, 1e-3));
-	svm->setGamma(0);
+	//svm->setCoef0(0.0);
+	//svm->setDegree(3);
+	//svm->setTermCriteria(cv::TermCriteria(CV_TERMCRIT_ITER + CV_TERMCRIT_EPS, 1000, 1e-3));
+	//svm->setGamma(0);
 	svm->setKernel(cv::ml::SVM::LINEAR);
-	svm->setNu(0.5);
+	//svm->setNu(0.5);
 	svm->setP(0.1); // for EPSILON_SVR, epsilon in loss function?
-	svm->setC(0.001); // From paper, soft classifier
+	//svm->setC(0.001); // From paper, soft classifier
 	svm->setType(cv::ml::SVM::EPS_SVR); // C_SVC; // EPSILON_SVR; // may be also NU_SVR; // do regression task
-	cv::Mat1d class_weights(1, 2);
-	class_weights(0) = 0.5;
-	class_weights(1) = 1.0;
-	svm->setClassWeights(class_weights);
-	svm->train(train_data, cv::ml::ROW_SAMPLE, cv::Mat(labels));
+	//cv::Mat1d class_weights(1, 2);
+	//class_weights(0) = 0.5;
+	//class_weights(1) = 1.0;
+	//svm->setClassWeights(class_weights);
+	//svm->train(train_data_mat, cv::ml::ROW_SAMPLE, cv::Mat(labels));
+	cv::Ptr<cv::ml::TrainData> train_data = cv::ml::TrainData::create(train_data_mat, cv::ml::ROW_SAMPLE, cv::Mat(labels));
+	svm->trainAuto(train_data, 10
+		, cv::ml::ParamGrid(0.01, 0.01, 0) //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::C)      // cv::ml::ParamGrid Cgrid =      
+		, cv::ml::ParamGrid(0, 0, 0)       //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::GAMMA)  // cv::ml::ParamGrid gammaGrid =  
+		, cv::ml::ParamGrid(0.1,0.1,0)     //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::P)      // cv::ml::ParamGrid pGrid =      
+		, cv::ml::ParamGrid(0.1,0.1,0)     //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::NU)     // cv::ml::ParamGrid nuGrid =     
+		, cv::ml::ParamGrid(0, 0, 0)       //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::COEF)   // cv::ml::ParamGrid coeffGrid =  
+		, cv::ml::ParamGrid(1, 3, 1)       //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::DEGREE) // cv::ml::ParamGrid degreeGrid = 
+		);
 	std::clog << "...[done]" << std::endl;
-
 	svm->save("lv_detector.yml");
 }
 
@@ -378,21 +386,21 @@ void test_it(const cv::Size & size)
 
 		Slice slice(image_name);
 		bbox = bbox & cv::Rect2d({ 0., 0. }, slice.image.size());
-		cv::Mat1d imaged = slice.image(bbox).clone();
+		cv::Mat1d imaged = slice.image.clone();
 
 		cv::resize(imaged, imaged, cv::Size(), slice.pixel_spacing[0], slice.pixel_spacing[1]);
 		draw = imaged.clone();
 		std::cout << i << " " << slice.pixel_spacing[0] << " " << slice.pixel_spacing[1] << std::endl;
 		cv::Mat1b image;
-		imaged.convertTo(image, image.type(), 255);
+		imaged.convertTo(image, image.type());
 		locations.clear();
 
-		hog.detectMultiScale(image, locations, -0.9, cv::Size(), cv::Size(), 1.05, 1.);// , -0.95, cv::Size(1, 1), cv::Size(0, 0), 1.2, 2.0);
+		hog.detectMultiScale(image, locations, 0.0, cv::Size(), cv::Size(), 1.075, 2.);// , -0.95, cv::Size(1, 1), cv::Size(0, 0), 1.2, 2.0);
 		cv::merge(std::vector<cv::Mat1d>(3, draw), draw);
 
 		draw_locations(draw, locations, trained);
 
-		imshow("Test", draw);
+		imshow("Test", draw/255);
 		key = char(cv::waitKey(0));
 		std::cout << (key == ' ' ? "bad" : "") << std::endl;
 	}
