@@ -1,0 +1,2 @@
+Train data = 161000 images
+Validation data = 65000 images
