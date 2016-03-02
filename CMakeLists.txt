@@ -56,7 +56,7 @@ find_package(OpenCV REQUIRED)
 
 set(Boost_USE_STATIC_LIBS        ON)
 set(Boost_USE_STATIC_RUNTIME     OFF)
-find_package(Boost REQUIRED filesystem program_options system)
+find_package(Boost REQUIRED filesystem program_options system regex)
 
 set(GDCM_USE_FILE "${PROJECT_SOURCE_DIR}/libs/gdcm/lib/gdcm-2.6")
 set(GDCM_DIR "${PROJECT_SOURCE_DIR}/libs/gdcm/lib/gdcm-2.6")

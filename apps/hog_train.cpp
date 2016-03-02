@@ -1,6 +1,8 @@
 #include <opencv2/opencv.hpp>
 #include "dicom_reader.hpp"
 
+#include "hog_parameters.hpp"
+
 #include <string>
 #include <iostream>
 #include <fstream>
@@ -278,7 +280,7 @@ cv::Mat get_hogdescriptor_visu(const cv::Mat& color_origImg, std::vector<float>&
 
 void compute_hog(const std::vector< cv::Mat > & img_lst, std::vector< cv::Mat > & gradient_lst, const cv::Size & size)
 {
-	cv::HOGDescriptor hog(size, cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, 1, -1.0, cv::HOGDescriptor::L2Hys, 0.1, false, 64, false);
+	cv::HOGDescriptor hog(size, cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, 1, -1.0, cv::HOGDescriptor::L2Hys, 0.05, false, 64, false);
 	cv::Mat gray;
 	std::vector<cv::Point> location;
 	std::vector<float> descriptors;
@@ -307,42 +309,42 @@ void train_svm(const std::vector< cv::Mat > & gradient_lst, const std::vector< i
 	cv::Ptr<cv::ml::SVM> svm = cv::ml::SVM::create();
 	/* Default values to train SVM */
 
-	//svm->setCoef0(0.0);
-	//svm->setDegree(3);
-	//svm->setTermCriteria(cv::TermCriteria(CV_TERMCRIT_ITER + CV_TERMCRIT_EPS, 1000, 1e-3));
-	//svm->setGamma(0);
+	svm->setCoef0(0.0);
+	svm->setDegree(3);
+	svm->setTermCriteria(cv::TermCriteria(CV_TERMCRIT_ITER + CV_TERMCRIT_EPS, 1000, 1e-3));
+	svm->setGamma(0);
 	svm->setKernel(cv::ml::SVM::LINEAR);
-	//svm->setNu(0.5);
+	svm->setNu(0.5);
 	svm->setP(0.1); // for EPSILON_SVR, epsilon in loss function?
-	//svm->setC(0.001); // From paper, soft classifier
+	svm->setC(0.001); // From paper, soft classifier
 	svm->setType(cv::ml::SVM::EPS_SVR); // C_SVC; // EPSILON_SVR; // may be also NU_SVR; // do regression task
 	//cv::Mat1d class_weights(1, 2);
-	//class_weights(0) = 0.5;
-	//class_weights(1) = 1.0;
+	//class_weights(0) = 1.0;
+	//class_weights(1) = 2.0;
 	//svm->setClassWeights(class_weights);
 	//svm->train(train_data_mat, cv::ml::ROW_SAMPLE, cv::Mat(labels));
+	
 	cv::Ptr<cv::ml::TrainData> train_data = cv::ml::TrainData::create(train_data_mat, cv::ml::ROW_SAMPLE, cv::Mat(labels));
 	svm->trainAuto(train_data, 10
-		, cv::ml::ParamGrid(0.01, 0.01, 0) //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::C)      // cv::ml::ParamGrid Cgrid =      
-		, cv::ml::ParamGrid(0, 0, 0)       //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::GAMMA)  // cv::ml::ParamGrid gammaGrid =  
-		, cv::ml::ParamGrid(0.1,0.1,0)     //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::P)      // cv::ml::ParamGrid pGrid =      
+		, cv::ml::ParamGrid(0.001, 1.0, 10) //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::C)      // cv::ml::ParamGrid Cgrid =      
+		, cv::ml::ParamGrid(0, 0, 0) //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::GAMMA) //cv::ml::ParamGrid(0, 0, 0)       // // cv::ml::ParamGrid gammaGrid =  
+		, cv::ml::ParamGrid(0.01,1.0,10)     //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::P)      // cv::ml::ParamGrid pGrid =      
 		, cv::ml::ParamGrid(0.1,0.1,0)     //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::NU)     // cv::ml::ParamGrid nuGrid =     
 		, cv::ml::ParamGrid(0, 0, 0)       //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::COEF)   // cv::ml::ParamGrid coeffGrid =  
-		, cv::ml::ParamGrid(1, 3, 1)       //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::DEGREE) // cv::ml::ParamGrid degreeGrid = 
+		, cv::ml::ParamGrid(1, 1, 0)       //cv::ml::SVM::getDefaultGrid(cv::ml::SVM::DEGREE) // cv::ml::ParamGrid degreeGrid = 
 		);
 	std::clog << "...[done]" << std::endl;
 	svm->save("lv_detector.yml");
 }
 
-void draw_locations(cv::Mat & img, const std::vector< cv::Rect > & locations, const cv::Scalar & color)
+void draw_locations(cv::Mat & img, const std::vector< cv::Rect > & locations, const cv::Scalar & color, double scale)
 {
 	if (!locations.empty())
 	{
 		std::vector< cv::Rect >::const_iterator loc = locations.begin();
 		std::vector< cv::Rect >::const_iterator end = locations.end();
-		for (; loc != end; ++loc)
-		{
-			rectangle(img, *loc, color, 1);
+		for (; loc != end; ++loc) {
+			cv::rectangle(img, cv::Rect((*loc).tl() * scale, (*loc).br() * scale), color, 1);
 		}
 	}
 }
@@ -354,7 +356,7 @@ void test_it(const cv::Size & size)
 	cv::Scalar trained(0, 0, 255);
 	cv::Mat img, draw;
 	cv::Ptr<cv::ml::SVM> svm;
-	cv::HOGDescriptor hog(size, cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, 1, -1.0, cv::HOGDescriptor::L2Hys, 0.1, false, 64, false);
+	cv::HOGDescriptor hog(size, cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, 1, -1.0, cv::HOGDescriptor::L2Hys, 0.05, false, 64, false);
 	std::vector< cv::Rect > locations;
 
 	// Load the trained SVM.
@@ -369,7 +371,8 @@ void test_it(const cv::Size & size)
 	int test_img_num = 49;
 	int landmark_num = 16;
 
-	std::ifstream fin("dataset/lv_keypointse16_test.txt");
+	//std::ifstream fin("dataset/lv_keypointse16_test.txt");
+	std::ifstream fin("dataset/lv_keypointse16_train.txt");
 	for (int i = 0; i < test_img_num; i++) {
 		std::string image_name;
 		double skip;
@@ -386,19 +389,24 @@ void test_it(const cv::Size & size)
 
 		Slice slice(image_name);
 		bbox = bbox & cv::Rect2d({ 0., 0. }, slice.image.size());
-		cv::Mat1d imaged = slice.image.clone();
+		cv::Mat1d imaged = slice.image(bbox).clone();
 
 		cv::resize(imaged, imaged, cv::Size(), slice.pixel_spacing[0], slice.pixel_spacing[1]);
-		draw = imaged.clone();
 		std::cout << i << " " << slice.pixel_spacing[0] << " " << slice.pixel_spacing[1] << std::endl;
+		double scale = 1.0;
+		//if (imaged.cols > 256 || imaged.rows > 256) {
+		//	scale = 256. / imaged.cols;
+		//	cv::resize(imaged, imaged, cv::Size(), scale, scale, cv::INTER_CUBIC);
+		//}
+		draw = imaged.clone();
 		cv::Mat1b image;
 		imaged.convertTo(image, image.type());
 		locations.clear();
 
-		hog.detectMultiScale(image, locations, 0.0, cv::Size(), cv::Size(), 1.075, 2.);// , -0.95, cv::Size(1, 1), cv::Size(0, 0), 1.2, 2.0);
+		hog.detectMultiScale(image, locations, 0.00, cv::Size(), cv::Size(), 1.05, 2.);// , -0.95, cv::Size(1, 1), cv::Size(0, 0), 1.2, 2.0);
 		cv::merge(std::vector<cv::Mat1d>(3, draw), draw);
 
-		draw_locations(draw, locations, trained);
+		draw_locations(draw, locations, trained, scale);
 
 		imshow("Test", draw/255);
 		key = char(cv::waitKey(0));
@@ -427,15 +435,17 @@ int main(int argc, char** argv)
 		exit(-1);
 	}
 
-	const cv::Size sample_size(32, 32);
+	const cv::Size sample_size = hog::SAMPLE_SIZE;
 	bool skip_train = std::stoi(argv[5]);
 	if (!skip_train) {
 		std::cout << "Loading pos." << std::endl;
 		load_images(pos_dir, pos, pos_lst);
+		std::cout << pos_lst.size() << std::endl;
 		labels.assign(pos_lst.size(), +1);
 		const unsigned int old = (unsigned int)labels.size();
 		std::cout << "Loading neg." << std::endl;
 		load_images(neg_dir, neg, neg_lst);
+		std::cout << neg_lst.size() << std::endl;
 		//sample_neg(full_neg_lst, neg_lst, sample_size);
 		labels.insert(labels.end(), neg_lst.size(), -1);
 		CV_Assert(old < labels.size());

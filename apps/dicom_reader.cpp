@@ -283,7 +283,8 @@ PatientData::PatientData(const std::string& data_path, const std::string& direct
 	if (chamber_views_ok) {
 		for (Sequence& sax : sax_seqs) {
 			const cv::Vec3d point_3d = slices_intersection(sax, ch2_seq, ch4_seq);
-			sax.intersection = { slices_intersection(ch2_seq, ch4_seq), slices_intersection(sax, ch2_seq), slices_intersection(sax, ch4_seq),
+			sax.intersection = {
+				slices_intersection(ch2_seq, ch4_seq), slices_intersection(sax, ch2_seq), slices_intersection(sax, ch4_seq),
 				point_3d,
 				sax.point_to_image(point_3d), ch2_seq.point_to_image(point_3d), ch4_seq.point_to_image(point_3d)
 			};

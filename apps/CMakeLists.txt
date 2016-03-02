@@ -36,8 +36,13 @@ SET(HEADERS dicom_reader.hpp hog_lv_detector.hpp contour_extraction.hpp ./cpr/Fa
 add_application_target(cpr_test "${SOURCE}" "${HEADERS}")
 
 # HOG object detection
-add_application_target(hog_train "dicom_reader.cpp" "dicom_reader.hpp")
-add_application_target(hog_prepare_samples "dicom_reader.cpp" "dicom_reader.hpp")
+SET(SOURCE dicom_reader.cpp)
+SET(HEADERS dicom_reader.hpp hog_parameters)
+add_application_target(hog_prepare_samples "${SOURCE}" "${HEADERS}")
+
+SET(SOURCE dicom_reader.cpp) # hog_svm_trainer.cpp)
+SET(HEADERS dicom_reader.hpp hog_parameters.hpp)
+add_application_target(hog_train "${SOURCE}" "${HEADERS}")
 
 
 # End-to-end

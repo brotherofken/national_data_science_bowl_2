@@ -12,7 +12,7 @@ cv::Rect HogLvDetector::detect(const cv::Mat1d& imaged, const cv::Point approxim
 	cv::Mat1b image;
 	imaged.convertTo(image, image.type(), 255);
 	locations.clear();
-	my_hog.detectMultiScale(image, locations, -0.9, cv::Size(), cv::Size(), 1.05, 2);
+	my_hog.detectMultiScale(image, locations, 0.0, cv::Size(), cv::Size(), 1.05, 2);
 
 	cv::Mat draw = imaged.clone();
 	if (draw_lv) {
@@ -23,15 +23,15 @@ cv::Rect HogLvDetector::detect(const cv::Mat1d& imaged, const cv::Point approxim
 	};
 
 
-	cv::Rect closest_rect = locations.size() ? *std::min_element(locations.begin(), locations.end(), [&](cv::Rect& a, cv::Rect& b) {
-		return dist_to_lv(a) < dist_to_lv(b);
-	}) : cv::Rect();
-	if (dist_to_lv(closest_rect) < 0.1 * imaged.cols) {
-		locations = { closest_rect };
-	}
-	else {
-		locations = {};
-	}
+	//cv::Rect closest_rect = locations.size() ? *std::min_element(locations.begin(), locations.end(), [&](cv::Rect& a, cv::Rect& b) {
+	//	return dist_to_lv(a) < dist_to_lv(b);
+	//}) : cv::Rect();
+	//if (dist_to_lv(closest_rect) < 0.1 * imaged.cols) {
+	//	locations = { closest_rect };
+	//}
+	//else {
+	//	locations = {};
+	//}
 
 	if (draw_lv) {
 		cv::merge(std::vector<cv::Mat1d>(3, draw), draw);
@@ -39,12 +39,12 @@ cv::Rect HogLvDetector::detect(const cv::Mat1d& imaged, const cv::Point approxim
 		cv::imshow("LV_detection", draw);
 	}
 
-	if (dist_to_lv(closest_rect) < 0.1 * imaged.cols) {
-		return closest_rect;
-	}
-	else {
+	//if (dist_to_lv(closest_rect) < 0.1 * imaged.cols) {
+	//	return closest_rect;
+	//}
+	//else {
 		return cv::Rect();
-	}
+	//}
 }
 
 void HogLvDetector::get_svm_detector(const cv::Ptr<cv::ml::SVM>& svm, std::vector<float> & hog_detector)

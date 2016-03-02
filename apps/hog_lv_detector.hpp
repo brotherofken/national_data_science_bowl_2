@@ -13,7 +13,8 @@ public:
 
 	HogLvDetector()
 		: svm(cv::ml::StatModel::load<cv::ml::SVM>("lv_detector.yml")) // Load the trained SVM.
-		, my_hog(cv::Size(32, 32), cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, 1, -1.0, cv::HOGDescriptor::L2Hys, 0.1, false, 64, false)
+		, my_hog(cv::Size(32, 32), cv::Size(16, 16), cv::Size(8, 8), cv::Size(8, 8), 9, 1, -1.0, cv::HOGDescriptor::L2Hys, 0.05, false, 64, false)
+
 	{
 		// Set the trained svm to my_hog
 		std::vector<float> hog_detector;
