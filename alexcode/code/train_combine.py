@@ -15,18 +15,20 @@ def load_train_data():
     """
     Load training data from .npy files.
     """
-    X = np.load('../input/X_train.npy')
-    y = np.load('../input/y_train.npy')
+    tX = np.load('../input/X_train.npy')
+    ty = np.load('../input/y_train.npy')
 
-    X = X.astype(np.float32)
-    X /= 255
-
+    tX = tX.astype(np.float32)
+    
     np.random.seed(seed)
-    np.random.shuffle(X)
-    np.random.seed(seed)
-    np.random.shuffle(y)
-
-    return X, y
+    shuffle_idx = np.random.permutation(np.arange(tX.shape[0]))
+    tX = tX[shuffle_idx]
+    ty = ty[shuffle_idx]
+    
+    vX = np.load('../input/X_valid.npy').astype(np.float32)
+    vy = np.load('../input/y_valid.npy')
+        
+    return tX, ty, vX, vy
 
 
 def split_data(X, y, split_ratio=0.2):
@@ -39,9 +41,9 @@ def split_data(X, y, split_ratio=0.2):
     """
     split = X.shape[0] * split_ratio
     X_test = X[:split, :, :, :]
-    y_test = y[:split, :]
+    y_test = y[:split]
     X_train = X[split:, :, :, :]
-    y_train = y[split:, :]
+    y_train = y[split:]
 
     return X_train, y_train, X_test, y_test
 
@@ -54,15 +56,18 @@ def train():
     model = get_model()
 
     logging.info('Loading training data...')
-    X, y = load_train_data()
+    X_train, y_train, X_test, y_test = load_train_data()
 
-    logging.info('Pre-processing images...')
-    X = preprocess(X)
+    logging.info('Pre-processing train images...')
+    X_train = preprocess(X_train)
+    
+    logging.info('Pre-processing validation images...')
+    X_test = preprocess(X_test)
 
     # split to training and test
-    X_train, y_train, X_test, y_test = split_data(X, y, split_ratio=0.15)
+    #X_train, y_train, X_test, y_test = split_data(X, y, split_ratio=0.15)
 
-    metric = 'rmse'
+    metric = 'mse'
     nb_iter = 600
     epochs_per_iter = 1
     batch_size = 32
