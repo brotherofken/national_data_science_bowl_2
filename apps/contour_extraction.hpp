@@ -42,7 +42,7 @@
 * @param eps Smoothing parameter, @f$\epsilon@f$
 * @return Value of the step function at @f$x@f$
 */
-double regularized_heaviside(double x, double eps = 1)
+double regularized_heaviside(const double x, const double eps = 1)
 {
 	const double pi = boost::math::constants::pi<double>();
 	return (1 + 2 / pi * std::atan(x / eps)) / 2;
@@ -57,7 +57,7 @@ double regularized_heaviside(double x, double eps = 1)
 * @param eps Smoothing parameter, @f$\epsilon@f$
 * @return Value of the delta function at @f$x@f$
 */
-double regularized_delta(double x, double eps = 1)
+double regularized_delta(const double x, const double eps = 1)
 {
 	const double pi = boost::math::constants::pi<double>();
 	return eps / (pi * (std::pow(eps, 2) + std::pow(x, 2)));

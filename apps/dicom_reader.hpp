@@ -114,7 +114,11 @@ struct PatientData
 	Sequence ch2_seq;
 	Sequence ch4_seq;
 	Sequence::Vector sax_seqs;
-	//Intersection::Vector intersections;
+
+	struct {
+		size_t min;
+		size_t max;
+	} volume_idx;
 };
 
 line_eq_t slices_intersection(const OrientedObject& s1, const OrientedObject& s2);

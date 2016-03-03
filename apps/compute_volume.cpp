@@ -30,6 +30,18 @@
 
 #include "opencv/plot.hpp"
 
+cv::Point2d operator*(cv::Mat1d M, const cv::Point2d& p)
+{
+	cv::Mat_<double> src(3/*rows*/, 1 /* cols */);
+
+	src(0, 0) = p.x;
+	src(1, 0) = p.y;
+	src(2, 0) = 1.0;
+
+	cv::Mat1d dst = M*src; //USE MATRIX ALGEBRA 
+	return cv::Point2d(dst(0, 0), dst(1, 0));
+}
+
 void visualize_mat(cv::Mat1d areas, const std::string& win_name, double cell_size = 32.) {
 	double min_area, max_area;
 	cv::minMaxLoc(areas, &min_area, &max_area);
@@ -294,7 +306,7 @@ int main(int argc, char ** argv)
 
 	bool save_landmarks = false;
 	bool show_windows = false;
-
+	bool save_normalized_ch2 = false;
 	size_t cpr_repeats{5};
 
 	//-- Parse command line arguments
@@ -310,6 +322,7 @@ int main(int argc, char ** argv)
 			("repeats,r", po::value<size_t>(&cpr_repeats), "CPR repeats count")
 			("show,s", "show gui with contours")
 			("landmarks,l", "compute and save landmarks")
+			("save_norm_ch2", "compute and save landmarks")
 			;
 		po::variables_map vm;
 		po::store(po::command_line_parser(argc, argv).options(desc).run(), vm);
@@ -323,6 +336,7 @@ int main(int argc, char ** argv)
 		if (vm.count("input") && !boost::filesystem::exists(data_path + "/" + input_patient)) msg_exit("Error: file \"" + input_patient + "\" does not exists!");
 		save_landmarks = vm.count("landmarks");
 		show_windows = vm.count("show");
+		save_normalized_ch2 = vm.count("save_norm_ch2");
 		if (!vm.count("repeats")) cpr_repeats = 5;
 	}
 	catch (std::exception & e) {
@@ -331,16 +345,35 @@ int main(int argc, char ** argv)
 
 	PatientData patient_data(data_path, input_patient);
 
-	//auto& sax = patient_data.sax_seqs[8];
-	//
-	//cv::Vec3d point_3d = slices_intersection(patient_data.ch2_seq.slices[0], patient_data.ch4_seq.slices[0], sax.slices[0]);
-	//cv::Point2d point = sax.point_to_image(point_3d);
-	//
-	//cv::Mat1d img = sax.slices[11].image;
-	//std::string input_filename = sax.slices[0].filename;
-	//
-	//std::pair <double, double> min_max = patient_data.get_min_max_bp_level();
-	//std::cout << "min_max: " << min_max.first << " " << min_max.second << std::endl;
+	if (save_normalized_ch2) {
+		const Slice& ch2_slice = patient_data.ch2_seq.slices[patient_data.volume_idx.max];
+		const Intersection& inter = patient_data.sax_seqs[patient_data.sax_seqs.size()/2].intersection;
+
+		const cv::Point2d p1 = ch2_slice.point_to_image(inter.ls2(-10));
+		const cv::Point2d p2 = ch2_slice.point_to_image(inter.ls2(10));
+		double angle = 180 * std::atan((p1.y - p2.y) / (p1.x - p2.x)) / CV_PI;
+
+		cv::Mat ch2_image_wrp = ch2_slice.image.clone();
+		const cv::Point rotation_center{ ch2_image_wrp.cols / 2, ch2_image_wrp.rows / 2 };
+		cv::Mat rm_2d = cv::getRotationMatrix2D(rotation_center, angle, 1);
+		cv::warpAffine(ch2_image_wrp, ch2_image_wrp, rm_2d, ch2_image_wrp.size());
+
+		const cv::Point2d sax_0_p1 = ch2_slice.point_to_image(patient_data.sax_seqs.front().intersection.ls2(0));
+		const cv::Point2d sax_N_p2 = ch2_slice.point_to_image(patient_data.sax_seqs.back().intersection.ls2(0));
+		const cv::Point top_point = rm_2d * sax_0_p1;
+		const cv::Point low_point = rm_2d * sax_N_p2;
+		size_t min_row = std::min(top_point.y, low_point.y);
+		size_t max_row = std::max(top_point.y, low_point.y);
+		min_row -= std::min(0.15 * (max_row - min_row), 20.);
+		max_row += std::min(0.15 * (max_row - min_row), 20.);
+		//ch2_image_wrp = ch2_image_wrp.rowRange(min_row, max_row);
+		cv::imshow("ch2_image_wrp", ch2_image_wrp);
+		cv::imwrite((boost::filesystem::path(data_path) / (input_patient + "_2ch_max_vol.png")).string(), ch2_image_wrp * 255);
+		cv::waitKey(10);
+	}
+
+	if (!show_windows && !save_landmarks)
+		return EXIT_SUCCESS;
 
 	int sax_id = 0;
 	int slice_id = 0;
@@ -693,45 +726,27 @@ int main(int argc, char ** argv)
 				draw_line(ch2_image, ch2_slice, inter.l24, cv::Scalar(0, max, 0), 1, 2);
 				//draw_line(ch2_image, ch2_slice, inter.ls2, cv::Scalar(max, 0, 0), 1, 2);
 
-				const cv::Point2d p1 = ch2_slice.point_to_image(inter.ls2(-10));
-				const cv::Point2d p2 = ch2_slice.point_to_image(inter.ls2(10));
-				const cv::Point2d row_dir{1, 0};
-				//double angle = 180 * std::acos((p1 - p2).dot(row_dir) / cv::norm(p1 - p2)) / CV_PI;
-				double angle = 180 * std::atan((p1.y - p2.y) / (p1.x - p2.x)) / CV_PI;
-				//angle = angle > 90 ? angle : -angle;
+				{
+					const cv::Point2d p1 = ch2_slice.point_to_image(inter.ls2(-10));
+					const cv::Point2d p2 = ch2_slice.point_to_image(inter.ls2(10));
+					double angle = 180 * std::atan((p1.y - p2.y) / (p1.x - p2.x)) / CV_PI;
 
-				auto rotate_p_aroud_p = [](cv::Point2d p, cv::Point2d c, double alpha) {
-					cv::Point2d pc = p - c;
-					return c + cv::Point2d(
-						pc.x * std::cos(CV_PI*alpha / 180) - pc.y * std::sin(CV_PI*alpha / 180),
-						pc.x * std::sin(CV_PI*alpha / 180) + pc.y * std::cos(CV_PI*alpha / 180)
-						);
-				};
-				cv::Mat ch2_image_wrp = ch2_slice.image.clone();
-				const cv::Point rotation_center{ ch2_image_wrp.cols / 2, ch2_image_wrp.rows / 2 };
+					cv::Mat ch2_image_wrp = ch2_slice.image.clone();
+					const cv::Point rotation_center{ ch2_image_wrp.cols / 2, ch2_image_wrp.rows / 2 };
+					cv::Mat rm_2d = cv::getRotationMatrix2D(rotation_center, angle, 1);
+					cv::warpAffine(ch2_image_wrp, ch2_image_wrp, rm_2d, ch2_image_wrp.size());
 
-				cv::warpAffine(ch2_image_wrp, ch2_image_wrp, cv::getRotationMatrix2D(rotation_center, angle, 1), ch2_image_wrp.size());
-
-				const cv::Point2d sax_0_p1 = ch2_slice.point_to_image(patient_data.sax_seqs.front().intersection.ls2(0));
-				const cv::Point2d sax_N_p2 = ch2_slice.point_to_image(patient_data.sax_seqs.back().intersection.ls2(0));
-				const cv::Point top_point = rotate_p_aroud_p(sax_0_p1, rotation_center, -angle);
-				const cv::Point low_point = rotate_p_aroud_p(sax_N_p2, rotation_center, -angle);
-				ch2_image_wrp = ch2_image_wrp(cv::Rect(cv::Point{ 0, std::min(top_point.y, low_point.y) }, cv::Point{ ch2_image_wrp.cols - 1, std::max(top_point.y, low_point.y) }));
-				cv::Mat ch2_image_wrp_dx, ch2_image_wrp_dy, ch2_image_wrp_m, ch2_image_wrp_dy_sums;
-				//cv::spatialGradient(cv::Mat1b(ch2_image_wrp)*255, ch2_image_wrp_dx, ch2_image_wrp_dy);
-				Sobel(ch2_image_wrp, ch2_image_wrp_dx,ch2_image_wrp.type(), 1, 0, 3);
-				Sobel(ch2_image_wrp, ch2_image_wrp_dy,ch2_image_wrp.type(), 0, 1, 3);
-
-
-				cv::normalize(cv::abs(ch2_image_wrp_dx), ch2_image_wrp_dx, 1., 0., cv::NORM_MINMAX);
-				cv::normalize(cv::abs(ch2_image_wrp_dy), ch2_image_wrp_dy, 1., 0., cv::NORM_MINMAX);
-				cv::reduce(ch2_image_wrp_dy, ch2_image_wrp_dy_sums, 0, cv::REDUCE_SUM);
-				cv::magnitude(ch2_image_wrp_dx, ch2_image_wrp_dy, ch2_image_wrp_m);
-				cv::imshow("ch2_image_wrp", ch2_image_wrp);
-				cv::imshow("ch2_image_wrp_dx", ch2_image_wrp_dx);
-				cv::imshow("ch2_image_wrp_dy", ch2_image_wrp_dy);
-				cv::imshow("ch2_image_wrp_m", ch2_image_wrp_m);
-
+					const cv::Point2d sax_0_p1 = ch2_slice.point_to_image(patient_data.sax_seqs.front().intersection.ls2(0));
+					const cv::Point2d sax_N_p2 = ch2_slice.point_to_image(patient_data.sax_seqs.back().intersection.ls2(0));
+					const cv::Point top_point = rm_2d * sax_0_p1;
+					const cv::Point low_point = rm_2d * sax_N_p2;
+					size_t min_row = std::min(top_point.y, low_point.y);
+					size_t max_row = std::max(top_point.y, low_point.y);
+					min_row -= std::min(0.15 * (max_row - min_row), 20.);
+					max_row += std::min(0.15 * (max_row - min_row), 20.);
+					ch2_image_wrp = ch2_image_wrp.rowRange(min_row, max_row);
+					cv::imshow("ch2_image_wrp", ch2_image_wrp);
+				}
 				cv::circle(ch2_image, inter.p_ch2, 2, cv::Scalar(0., 0., max), -1);
 
 

@@ -349,6 +349,21 @@ PatientData::PatientData(const std::string& data_path, const std::string& direct
 		s.image.setTo(1, s.image > 1.0);
 	}
 
+	// Read min/max volumes from cache if available
+	if (boost::filesystem::exists(boost::filesystem::path(data_path) / "min_max_frame_idxs.csv")) {
+		std::ifstream fin((boost::filesystem::path(data_path) / "min_max_frame_idxs.csv").string());
+		int fin_pat_id, fin_min, fin_max;
+		while (fin >> fin_pat_id >> fin_min >> fin_max) {
+			if (fin_pat_id == this->number) {
+				volume_idx.min = fin_min;
+				volume_idx.max = fin_max;
+				break;
+			}
+		}
+	} else {
+		volume_idx.min = 12;
+		volume_idx.max = 0;
+	}
 
 }
 

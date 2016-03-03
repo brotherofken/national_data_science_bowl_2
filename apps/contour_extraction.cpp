@@ -139,8 +139,8 @@ cv::Mat1d perona_malik(const cv::Mat1d& image, const PeronaMalikArgs& args)
 
 cv::Mat1d segmentation_chan_vese(const cv::Mat1d& img, const cv::Mat1d& init, const ChanVeseArgs& args)
 {
-	const auto heaviside = std::bind(regularized_heaviside, std::placeholders::_1, args.eps);
-	const auto delta = std::bind(regularized_delta, std::placeholders::_1, args.eps);
+	const std::function<double(double)> heaviside = std::bind(regularized_heaviside, std::placeholders::_1, double(args.eps));
+	const std::function<double(double)> delta = std::bind(regularized_delta, std::placeholders::_1, double(args.eps));
 
 	cv::Mat1d u = init.clone();
 
