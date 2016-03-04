@@ -6,6 +6,11 @@
 #include <utility>
 #include <functional>
 
+struct LandmarksAnnotation {
+	LandmarksAnnotation(const std::string& path);
+	std::map<std::string, std::vector<cv::Point2d>> annotations;
+};
+
 using line_eq_t = std::function<cv::Vec3d(double)>;
 struct Intersection {
 	line_eq_t l24;
@@ -115,10 +120,24 @@ struct PatientData
 	Sequence ch4_seq;
 	Sequence::Vector sax_seqs;
 
+	struct Ch2NormedData
+	{
+		cv::Mat1d image;
+		double andle;
+		cv::Mat rotation_mat;
+		cv::Rect lv_location;
+		cv::Mat landmarks;
+	};
+
+	Ch2NormedData get_normalized_2ch(size_t frame_number);
+
 	struct {
 		size_t min;
 		size_t max;
 	} volume_idx;
+
+	std::string data_path;
+	LandmarksAnnotation ch2_annotations;
 };
 
 line_eq_t slices_intersection(const OrientedObject& s1, const OrientedObject& s2);

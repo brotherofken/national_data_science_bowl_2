@@ -30,18 +30,6 @@
 
 #include "opencv/plot.hpp"
 
-cv::Point2d operator*(cv::Mat1d M, const cv::Point2d& p)
-{
-	cv::Mat_<double> src(3/*rows*/, 1 /* cols */);
-
-	src(0, 0) = p.x;
-	src(1, 0) = p.y;
-	src(2, 0) = 1.0;
-
-	cv::Mat1d dst = M*src; //USE MATRIX ALGEBRA 
-	return cv::Point2d(dst(0, 0), dst(1, 0));
-}
-
 void visualize_mat(cv::Mat1d areas, const std::string& win_name, double cell_size = 32.) {
 	double min_area, max_area;
 	cv::minMaxLoc(areas, &min_area, &max_area);
@@ -307,7 +295,7 @@ int main(int argc, char ** argv)
 	bool save_landmarks = false;
 	bool show_windows = false;
 	bool save_normalized_ch2 = false;
-	size_t cpr_repeats{5};
+	size_t cpr_repeats{ 5 };
 
 	//-- Parse command line arguments
 	//   Negative values in multitoken are not an issue, b/c it doesn't make much sense
@@ -328,6 +316,9 @@ int main(int argc, char ** argv)
 		po::store(po::command_line_parser(argc, argv).options(desc).run(), vm);
 		po::notify(vm);
 
+		std::replace(data_path.begin(), data_path.end(), char('\\'), char('/'));
+		std::replace(input_patient.begin(), input_patient.end(), char('\\'), char('/'));
+
 		if (vm.count("help")) {
 			std::cout << desc << "\n";
 			return EXIT_SUCCESS;
@@ -346,30 +337,40 @@ int main(int argc, char ** argv)
 	PatientData patient_data(data_path, input_patient);
 
 	if (save_normalized_ch2) {
-		const Slice& ch2_slice = patient_data.ch2_seq.slices[patient_data.volume_idx.max];
-		const Intersection& inter = patient_data.sax_seqs[patient_data.sax_seqs.size()/2].intersection;
+		
+		for (int slice_id{}; slice_id < patient_data.ch2_seq.slices.size(); ++slice_id) {
 
-		const cv::Point2d p1 = ch2_slice.point_to_image(inter.ls2(-10));
-		const cv::Point2d p2 = ch2_slice.point_to_image(inter.ls2(10));
-		double angle = 180 * std::atan((p1.y - p2.y) / (p1.x - p2.x)) / CV_PI;
+			std::string filename = patient_data.ch2_seq.slices[slice_id].filename;
+			filename.erase(0, data_path.size() + 1);
 
-		cv::Mat ch2_image_wrp = ch2_slice.image.clone();
-		const cv::Point rotation_center{ ch2_image_wrp.cols / 2, ch2_image_wrp.rows / 2 };
-		cv::Mat rm_2d = cv::getRotationMatrix2D(rotation_center, angle, 1);
-		cv::warpAffine(ch2_image_wrp, ch2_image_wrp, rm_2d, ch2_image_wrp.size());
+			std::vector<cv::Point2d> landmarks;
+			if (patient_data.ch2_annotations.annotations.count(filename) == 0) continue;
 
-		const cv::Point2d sax_0_p1 = ch2_slice.point_to_image(patient_data.sax_seqs.front().intersection.ls2(0));
-		const cv::Point2d sax_N_p2 = ch2_slice.point_to_image(patient_data.sax_seqs.back().intersection.ls2(0));
-		const cv::Point top_point = rm_2d * sax_0_p1;
-		const cv::Point low_point = rm_2d * sax_N_p2;
-		size_t min_row = std::min(top_point.y, low_point.y);
-		size_t max_row = std::max(top_point.y, low_point.y);
-		min_row -= std::min(0.15 * (max_row - min_row), 20.);
-		max_row += std::min(0.15 * (max_row - min_row), 20.);
-		//ch2_image_wrp = ch2_image_wrp.rowRange(min_row, max_row);
-		cv::imshow("ch2_image_wrp", ch2_image_wrp);
-		cv::imwrite((boost::filesystem::path(data_path) / (input_patient + "_2ch_max_vol.png")).string(), ch2_image_wrp * 255);
-		cv::waitKey(10);
+			PatientData::Ch2NormedData ch2_image_normalized = patient_data.get_normalized_2ch(slice_id);
+
+			//for (auto& point : cv::Mat2d(ch2_image_normalized.landmarks)) {
+			//	cv::circle(ch2_image_normalized.image, cv::Point(point[0], point[1]), 2, cv::Scalar(max, 0, max), -1, 8, 0);
+			//}
+			//cv::rectangle(ch2_image_normalized.image, ch2_image_normalized.lv_location, cv::Scalar(255, 255, 0));
+			//cv::imshow("ch2_image_wrp", ch2_image_normalized.image);
+			cv::imshow("ch2_image_wrp", ch2_image_normalized.image);
+			std::string image_path = (boost::filesystem::path(data_path) / (input_patient + "_2ch_" + std::to_string(slice_id) + "_max_vol")).string();
+			cv::imwrite(image_path + ".png", ch2_image_normalized.image * 255);
+
+			std::ofstream fout(image_path + ".csv");
+			fout
+				<< image_path + ".png" << "\t"
+				<< ch2_image_normalized.lv_location.x << "\t"
+				<< ch2_image_normalized.lv_location.y << "\t"
+				<< ch2_image_normalized.lv_location.width << "\t"
+				<< ch2_image_normalized.lv_location.height;
+
+			for (auto& point : cv::Mat2d(ch2_image_normalized.landmarks)) {
+				fout << "\t" << point[0] << "\t" << point[1];
+			}
+			fout << std::endl;
+			cv::waitKey(10);
+		}
 	}
 
 	if (!show_windows && !save_landmarks)
@@ -727,28 +728,22 @@ int main(int argc, char ** argv)
 				//draw_line(ch2_image, ch2_slice, inter.ls2, cv::Scalar(max, 0, 0), 1, 2);
 
 				{
-					const cv::Point2d p1 = ch2_slice.point_to_image(inter.ls2(-10));
-					const cv::Point2d p2 = ch2_slice.point_to_image(inter.ls2(10));
-					double angle = 180 * std::atan((p1.y - p2.y) / (p1.x - p2.x)) / CV_PI;
-
-					cv::Mat ch2_image_wrp = ch2_slice.image.clone();
-					const cv::Point rotation_center{ ch2_image_wrp.cols / 2, ch2_image_wrp.rows / 2 };
-					cv::Mat rm_2d = cv::getRotationMatrix2D(rotation_center, angle, 1);
-					cv::warpAffine(ch2_image_wrp, ch2_image_wrp, rm_2d, ch2_image_wrp.size());
-
-					const cv::Point2d sax_0_p1 = ch2_slice.point_to_image(patient_data.sax_seqs.front().intersection.ls2(0));
-					const cv::Point2d sax_N_p2 = ch2_slice.point_to_image(patient_data.sax_seqs.back().intersection.ls2(0));
-					const cv::Point top_point = rm_2d * sax_0_p1;
-					const cv::Point low_point = rm_2d * sax_N_p2;
-					size_t min_row = std::min(top_point.y, low_point.y);
-					size_t max_row = std::max(top_point.y, low_point.y);
-					min_row -= std::min(0.15 * (max_row - min_row), 20.);
-					max_row += std::min(0.15 * (max_row - min_row), 20.);
-					ch2_image_wrp = ch2_image_wrp.rowRange(min_row, max_row);
-					cv::imshow("ch2_image_wrp", ch2_image_wrp);
+					PatientData::Ch2NormedData ch2_image_normalized = patient_data.get_normalized_2ch(slice_id);
+					for (auto& point : cv::Mat2d(ch2_image_normalized.landmarks)) {
+						cv::circle(ch2_image_normalized.image, cv::Point(point[0], point[1]), 2, cv::Scalar(max, 0, max), -1, 8, 0);
+					}
+					cv::rectangle(ch2_image_normalized.image, ch2_image_normalized.lv_location, cv::Scalar(255, 255, 0));
+					cv::imshow("ch2_image_wrp", ch2_image_normalized.image);
 				}
 				cv::circle(ch2_image, inter.p_ch2, 2, cv::Scalar(0., 0., max), -1);
 
+				std::string filename = ch2_slice.filename;
+				filename.erase(0, data_path.size() + 1);
+				if (patient_data.ch2_annotations.annotations.count(filename)) {
+					for (auto& point : patient_data.ch2_annotations.annotations[filename]) {
+						cv::circle(ch2_image, point, 2, cv::Scalar(max, 0, max), -1, 8, 0);
+					}
+				}
 
 				cv::resize(ch2_image, ch2_image, cv::Size(0, 0), scale_ch2, scale_ch2, CV_INTER_LANCZOS4);
 
