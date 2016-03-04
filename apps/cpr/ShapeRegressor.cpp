@@ -69,12 +69,35 @@ void ShapeRegressor::Train(const vector<Mat_<uchar> >& images,
             }while(index == i);
             augmented_images.push_back(images[i]);
             augmented_ground_truth_shapes.push_back(ground_truth_shapes[i]);
-            augmented_bounding_box.push_back(bounding_box[i]); 
+
+			BoundingBox aug_bbox = bounding_box[i];
+			aug_bbox.height *= random_generator.uniform(1., 1.5);// random_generator.uniform(bounding_box[i].height*0.0, bounding_box[i].height * 1.0);
+			aug_bbox.width *= aug_bbox.height / bounding_box[i].height; // random_generator.uniform(bounding_box[i].width*0.0, bounding_box[i].width * 0.5);
+			aug_bbox.start_x -= (aug_bbox.height - bounding_box[i].height) / 2;
+			aug_bbox.start_y -= (aug_bbox.width - bounding_box[i].width) / 2;
+			aug_bbox.centroid_x = aug_bbox.start_x + aug_bbox.width / 2.0;
+			aug_bbox.centroid_y = aug_bbox.start_y + aug_bbox.height / 2.0;
+
+            augmented_bounding_box.push_back(aug_bbox);
             // 1. Select ground truth shapes of other images as initial shapes
             // 2. Project current shape to bounding box of ground truth shapes 
             Mat_<double> temp = ground_truth_shapes[index];
             temp = ProjectShape(temp, bounding_box[index]);
-            temp = ReProjectShape(temp, bounding_box[i]);
+			temp = ReProjectShape(temp, aug_bbox/*bounding_box[i]*/);
+
+#if _DEBUG
+			{
+				cv::Mat img = images[i].clone();
+				cv::rectangle(img, cv::Rect(aug_bbox.start_x, aug_bbox.start_y, aug_bbox.width, aug_bbox.height), 255);
+
+				for (int i = 0; i < 15; i++) {
+					cv::circle(img, cv::Point2d(temp(i, 0), temp(i, 1)), 1, cv::Scalar(255), -1);
+				}
+
+				cv::imshow("augmented sample", img);
+				cv::waitKey(0);
+			}
+#endif
             current_shapes.push_back(temp); 
         } 
     }
@@ -108,7 +131,10 @@ void ShapeRegressor::Write(std::ostream& fout)
 
 	io::write_mat(fout, mean_shape_);
 
-	fout << training_shapes_.size();
+	//fout << 
+	long training_num_ = training_shapes_.size();
+	fout.write(reinterpret_cast<char*>(&training_num_), 4);
+
 	io::write_vector(fout, bounding_box_);
 	for (int i = 0; i < training_shapes_.size(); i++) {
 		io::write_mat(fout, training_shapes_[i]);
@@ -151,8 +177,9 @@ void ShapeRegressor::Read(std::istream& fin)
 	mean_shape_ = cv::Mat(landmark_num_, 2, CV_64FC1);
 	io::read_mat(fin, mean_shape_);
 
-	int training_num;
-	fin >> training_num;
+	long training_num;
+	fin.read(reinterpret_cast<char*>(&training_num), 4);
+	//fin >> training_num;
 	training_shapes_.resize(training_num);
 	bounding_box_.resize(training_num);
 
@@ -201,27 +228,30 @@ void ShapeRegressor::Read(std::istream& fin)
 }
 
 
-Mat1d ShapeRegressor::Predict(const Mat1b& image, const BoundingBox& bounding_box, int initial_num, const cv::Mat1d& initial_contour)
+Mat1d ShapeRegressor::Predict(const Mat1b& image, const BoundingBox& _bounding_box, int initial_num, const cv::Mat1d& initial_contour)
 {
 	// generate multiple initializations
 	Mat1d result = Mat::zeros(landmark_num_, 2, CV_64FC1);
 	RNG random_generator(getTickCount());
 
 	//if (!initial_contour.empty()) initial_num = 1;
-
+	BoundingBox orig_bbox = _bounding_box;
 	for (int i = 0; i < initial_num; i++) {
 		random_generator = RNG(i);
 		//int index = random_generator.uniform(0, training_shapes_.size());
 		Mat1d current_shape;
 		current_shape = mean_shape_.clone();
+		BoundingBox bounding_box = orig_bbox;
 		if (i != 0) {
 			for (size_t r{}; r < current_shape.rows; ++r) {
 				for (size_t c{}; c < current_shape.cols; ++c) {
 					current_shape(r, c) += random_generator.uniform(-0.125, 0.125); // Random jiggling
 				}
 			}
+			//bounding_box.start_y += random_generator.uniform(-orig_bbox.height*0.4, orig_bbox.height * 0.4);
+			//bounding_box.height += random_generator.uniform(-orig_bbox.height*0.4, orig_bbox.height * 0.4);
 		}
-		
+
 		//BoundingBox current_bounding_box = bounding_box_[index];
 		//if (i != 0) current_shape = ProjectShape(current_shape, bounding_box);// current_bounding_box);
 		current_shape = ReProjectShape(current_shape, bounding_box);

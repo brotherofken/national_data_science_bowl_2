@@ -189,14 +189,7 @@ double get_circle_for_point(const cv::Mat1f& img, const cv::Point& estimated_cen
 
 
 int main() {
-	const int img_num = 500; // WHATTA
-	const int candidate_pixel_num = 300; // TOO MUCH
-	const int fern_pixel_num = 5;
-	const int first_level_num = 10; // cascades
-	const int second_level_num = 250; // trees per cascade
-	const int landmark_num = 16;
-	const int initial_number = 40;
-	bool show_train = true;
+
 
 	std::vector<cv::Mat1b> images;
 	std::vector<BoundingBox> bbox;
@@ -206,8 +199,89 @@ int main() {
 	std::cout << "Read images..." << std::endl;
 	std::vector<cv::Mat1d> ground_truth_shapes;
 	std::vector<BoundingBox> bounding_box;
-	std::ifstream fin("dataset/lv_keypointse16_train.txt");
+	std::ifstream fin("lm_dataset/landmarks_annotation.csv");
 
+#if 1
+
+	const int img_num = 95; // WHATTA
+	const int candidate_pixel_num = 300; // TOO MUCH
+	const int fern_pixel_num = 5;
+	const int first_level_num = 10; // cascades
+	const int second_level_num = 300; // trees per cascade
+	const int landmark_num = 15;
+	const int initial_number = 50;
+	bool show_train = true;
+
+	for (int i = 0; i < img_num; i++) {
+		std::string image_name;
+		BoundingBox bbox;
+		fin >> image_name >> bbox.start_x >> bbox.start_y >> bbox.width >> bbox.height;
+		bbox.centroid_x = bbox.start_x + bbox.width / 2.0;
+		bbox.centroid_y = bbox.start_y + bbox.height / 2.0;
+		// Read image
+		cv::Mat1d imaged  = cv::imread(image_name, cv::IMREAD_GRAYSCALE);
+
+		cv::Mat1d landmarks(landmark_num, 2);
+		for (int j = 0; j < landmark_num; j++) {
+			fin >> landmarks(j, 0) >> landmarks(j, 1);
+			landmarks(j, 0);
+			landmarks(j, 1);
+		}
+
+		cv::Mat1b image;
+		imaged.convertTo(image, image.type());
+
+		ground_truth_shapes.push_back(landmarks.clone());
+		images.push_back(image.clone());
+		bounding_box.push_back(BoundingBox(bbox));
+
+		cv::flip(image, image, 1);
+
+		for (size_t r{}; r < landmarks.rows; ++r) {
+			landmarks(r, 0) = image.cols - landmarks(r, 0);
+		}
+
+		bbox.start_x = image.cols - bbox.start_x - bbox.width;
+		bbox.centroid_x = bbox.start_x + bbox.width / 2.0;
+
+		ground_truth_shapes.push_back(landmarks);
+		images.push_back(image.clone());
+		bounding_box.push_back(bbox);
+
+		if (show_train) {
+			cv::Mat test_image_1 = images.back().clone();
+			cv::cvtColor(test_image_1, test_image_1, CV_GRAY2BGR);
+			double scale = 1;
+			cv::resize(test_image_1, test_image_1, cv::Size(), scale, scale);
+
+			cv::putText(test_image_1, image_name, cv::Point(15, 15), CV_FONT_HERSHEY_COMPLEX, 0.4, cv::Scalar(255, 255, 255));
+			for (int i = 0; i < landmark_num; i++) {
+				circle(test_image_1, cv::Point2d(landmarks(i, 0), landmarks(i, 1))*scale, 1, cv::Scalar(0, 255, 0), -1, 8, 0);
+			}
+
+			cv::Rect roi(bbox.start_x*scale, bbox.start_y*scale, bbox.width*scale, bbox.height*scale);
+			cv::rectangle(test_image_1, roi, cv::Scalar(255, 0, 0));
+
+			//cv::circle(test_image_1, estimated_center, R, cv::Scalar(255, 0, 255));
+
+			imshow("gt", test_image_1);
+			int key = cv::waitKey(0);
+			show_train = key != 'q';
+		}
+		int key = cv::waitKey(1);
+
+	}
+	fin.close();
+#else
+
+	const int img_num = 500; // WHATTA
+	const int candidate_pixel_num = 300; // TOO MUCH
+	const int fern_pixel_num = 5;
+	const int first_level_num = 10; // cascades
+	const int second_level_num = 250; // trees per cascade
+	const int landmark_num = 16;
+	const int initial_number = 40;
+	bool show_train = true;
 
 	for (int i = 0; i < img_num; i++) {
 		std::string image_name;
@@ -277,11 +351,6 @@ int main() {
 				cv::Rect roi(bbox.start_x*scale, bbox.start_y*scale, bbox.width*scale, bbox.height*scale);
 				cv::rectangle(test_image_1, roi, cv::Scalar(255, 0, 0));
 
-				//lv_rect.center *= scale;
-				//lv_rect.size.width *= scale;
-				//lv_rect.size.height *= scale;
-				//cv::ellipse(test_image_1, lv_rect, cv::Scalar(255, 0, 0));
-
 				cv::circle(test_image_1, estimated_center, R, cv::Scalar(255, 0, 255));
 
 				imshow("gt", test_image_1);
@@ -292,11 +361,15 @@ int main() {
 		}
 	}
 	fin.close();
+#endif
 
 	ShapeRegressor regressor;
 	regressor.Train(images, ground_truth_shapes, bounding_box, first_level_num, second_level_num, candidate_pixel_num, fern_pixel_num, initial_number);
+#if 1
+	regressor.Save("cpr_model_ch2.txt");
+#else
 	regressor.Save("cpr_model_circled_kmeans_smooth.txt");
-
+#endif
 	return 0;
 }
 

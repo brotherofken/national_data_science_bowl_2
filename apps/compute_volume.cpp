@@ -387,6 +387,9 @@ int main(int argc, char ** argv)
 	ShapeRegressor regressor;
 	regressor.Load("cpr_model_circled_kmeans_smooth.txt");
 
+	ShapeRegressor ch2_regressor;
+	ch2_regressor.Load("cpr_model_ch2.txt");
+
 	HogLvDetector lv_detector;
 
 	auto shape2polygon = [] (const cv::Mat1d& shape, const cv::Vec3d& spacing) {
@@ -729,11 +732,29 @@ int main(int argc, char ** argv)
 
 				{
 					PatientData::Ch2NormedData ch2_image_normalized = patient_data.get_normalized_2ch(slice_id);
-					for (auto& point : cv::Mat2d(ch2_image_normalized.landmarks)) {
-						cv::circle(ch2_image_normalized.image, cv::Point(point[0], point[1]), 2, cv::Scalar(max, 0, max), -1, 8, 0);
+					cv::Mat ch2_image_norm_img = ch2_image_normalized.image.clone();
+					cv::Mat1b image1b;
+					ch2_image_normalized.image.convertTo(image1b, image1b.type(), 255);
+
+					cv::merge(std::vector<cv::Mat>(3, ch2_image_norm_img), ch2_image_norm_img);
+					if (ch2_image_normalized.landmarks.rows) {
+						for (auto& point : cv::Mat2d(ch2_image_normalized.landmarks)) {
+							cv::circle(ch2_image_norm_img, cv::Point(point[0], point[1]), 2, cv::Scalar(max, 0, max), -1, 8, 0);
+						}
 					}
-					cv::rectangle(ch2_image_normalized.image, ch2_image_normalized.lv_location, cv::Scalar(255, 255, 0));
-					cv::imshow("ch2_image_wrp", ch2_image_normalized.image);
+					
+					BoundingBox bbox = { ch2_image_normalized.lv_location.x, ch2_image_normalized.lv_location.y, ch2_image_normalized.lv_location.width, ch2_image_normalized.lv_location.height };
+					bbox.centroid_x = bbox.start_x + bbox.width / 2.0;
+					bbox.centroid_y = bbox.start_y + bbox.height / 2.0;
+					cv::Mat1d current_shape = ch2_regressor.Predict(image1b, bbox, 15);// cpr_repeats);
+
+					for (int i = 0; i < 15; i++) {
+						cv::circle(ch2_image_norm_img, cv::Point2d(current_shape(i, 0), current_shape(i, 1)), 1, cv::Scalar(max, 0, max), -1);
+						cv::circle(ch2_image, ch2_image_normalized.inv_rotation_mat * cv::Point2d(current_shape(i, 0), current_shape(i, 1)), 1, cv::Scalar(0, 0, max), -1);
+					}
+					cv::rectangle(ch2_image_norm_img, ch2_image_normalized.lv_location, cv::Scalar(255, 255, 0));
+					cv::resize(ch2_image_norm_img, ch2_image_norm_img, cv::Size(), 256. / ch2_image_norm_img.cols, 256. / ch2_image_norm_img.cols);
+					cv::imshow("ch2_image_wrp", ch2_image_norm_img);
 				}
 				cv::circle(ch2_image, inter.p_ch2, 2, cv::Scalar(0., 0., max), -1);
 
@@ -752,12 +773,12 @@ int main(int argc, char ** argv)
 					draw_line(ch2_image, ch2_slice, patient_data.sax_seqs[i].intersection.ls2, cv::Scalar(max*0.35, 0, 0), scale_ch2, 1);
 					cv::Vec3d estimated_3d = patient_data.sax_seqs[i].point_to_3d(patient_data.sax_seqs[i].slices[slice_id].estimated_center);
 					cv::circle(ch2_image, patient_data.ch2_seq.point_to_image(estimated_3d) * scale_ch2, 2, cv::Scalar(max, 0, max), -1, 8, 0);
-
+				
 					cv::Mat1d slice_shape = patient_data.sax_seqs[i].slices[slice_id].aux["landmarks"];
-					for (int j = 0; j < landmark_num; j++) {
-						cv::Vec3d estimated_3d = patient_data.sax_seqs[i].slices[slice_id].point_to_3d(cv::Point2d(slice_shape(j, 0), slice_shape(j, 1)));
-						cv::circle(ch2_image, ch2_slice.point_to_image(estimated_3d) * scale_ch2, 1, cv::Scalar(0, 0, 255), -1, 8, 0);
-					}
+					//for (int j = 0; j < landmark_num; j++) {
+					//	cv::Vec3d estimated_3d = patient_data.sax_seqs[i].slices[slice_id].point_to_3d(cv::Point2d(slice_shape(j, 0), slice_shape(j, 1)));
+					//	cv::circle(ch2_image, ch2_slice.point_to_image(estimated_3d) * scale_ch2, 1, cv::Scalar(0, 0, 255), -1, 8, 0);
+					//}
 				}
 
 				cv::imshow("ch2", ch2_image);
@@ -776,12 +797,12 @@ int main(int argc, char ** argv)
 					draw_line(ch4_image, ch4_slice, patient_data.sax_seqs[i].intersection.ls4, cv::Scalar(max*0.35, 0, 0), scale_ch4, 1);
 					cv::Vec3d estimated_3d = patient_data.sax_seqs[i].point_to_3d(patient_data.sax_seqs[i].slices[slice_id].estimated_center);
 					cv::circle(ch4_image, patient_data.ch4_seq.point_to_image(estimated_3d) * scale_ch4, 2, cv::Scalar(max, 0, max), -1, 8, 0);
-
-					cv::Mat1d slice_shape = patient_data.sax_seqs[i].slices[slice_id].aux["landmarks"];
-					for (int j = 0; j < landmark_num; j++) {
-						cv::Vec3d estimated_3d = patient_data.sax_seqs[i].slices[slice_id].point_to_3d(cv::Point2d(slice_shape(j, 0), slice_shape(j, 1)));
-						cv::circle(ch4_image, ch4_slice.point_to_image(estimated_3d) * scale_ch4, 1, cv::Scalar(0, 0, 255), -1, 8, 0);
-					}
+				
+					//cv::Mat1d slice_shape = patient_data.sax_seqs[i].slices[slice_id].aux["landmarks"];
+					//for (int j = 0; j < landmark_num; j++) {
+					//	cv::Vec3d estimated_3d = patient_data.sax_seqs[i].slices[slice_id].point_to_3d(cv::Point2d(slice_shape(j, 0), slice_shape(j, 1)));
+					//	cv::circle(ch4_image, ch4_slice.point_to_image(estimated_3d) * scale_ch4, 1, cv::Scalar(0, 0, 255), -1, 8, 0);
+					//}
 				}
 
 

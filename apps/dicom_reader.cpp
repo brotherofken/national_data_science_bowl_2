@@ -18,18 +18,6 @@ const std::string PatientData::AUX_CONTOUR = "lv_annotation";
 
 namespace fs = ::boost::filesystem;
 
-cv::Point2d operator*(cv::Mat1d M, const cv::Point2d& p)
-{
-	cv::Mat_<double> src(3/*rows*/, 1 /* cols */);
-
-	src(0, 0) = p.x;
-	src(1, 0) = p.y;
-	src(2, 0) = 1.0;
-
-	cv::Mat1d dst = M*src; //USE MATRIX ALGEBRA 
-	return cv::Point2d(dst(0, 0), dst(1, 0));
-}
-
 std::map<std::string, cv::Point> read_estimated_points(const std::string& path)
 {
 	std::ifstream fin(path);
@@ -426,7 +414,7 @@ void PatientData::save_goodness() const {
 PatientData::Ch2NormedData PatientData::get_normalized_2ch(size_t frame_number)
 {
 	if (ch2_seq.empty) {
-		return Ch2NormedData{cv::Mat1d(), 0, cv::Mat(), cv::Rect(), cv::Mat()};
+		return Ch2NormedData{ cv::Mat1d(), 0, cv::Mat(), cv::Mat(), cv::Rect(), cv::Mat() };
 	}
 	const Slice& ch2_slice = ch2_seq.slices[frame_number];
 	const Intersection& inter = sax_seqs[sax_seqs.size()/2].intersection; // get intersection from the middle
@@ -438,6 +426,8 @@ PatientData::Ch2NormedData PatientData::get_normalized_2ch(size_t frame_number)
 	cv::Mat ch2_image_wrp = ch2_slice.image.clone();
 	const cv::Point rotation_center{ ch2_image_wrp.cols / 2, ch2_image_wrp.rows / 2 };
 	cv::Mat rm_2d = cv::getRotationMatrix2D(rotation_center, angle, 1);
+	cv::Mat inv_rm_2d = cv::getRotationMatrix2D(rotation_center, -angle, 1);
+
 	cv::warpAffine(ch2_image_wrp, ch2_image_wrp, rm_2d, ch2_image_wrp.size());
 
 	const cv::Point2d sax_0_p1 = ch2_slice.point_to_image(sax_seqs.front().intersection.ls2(0));
@@ -460,7 +450,7 @@ PatientData::Ch2NormedData PatientData::get_normalized_2ch(size_t frame_number)
 	}
 	std::sort(estimated_centers_ch2.begin(), estimated_centers_ch2.end(), [](cv::Point2d a, cv::Point2d b){return a.x < b.x; });
 	cv::Point2d median_point = estimated_centers_ch2[estimated_centers_ch2.size() / 2];
-	cv::circle(ch2_image_wrp, median_point, 2, 255, -1);
+	//cv::circle(ch2_image_wrp, median_point, 2, 255, -1);
 
 	cv::Rect lv_roi = cv::Rect(cv::Point(median_point.x - 0.5*height, min_row), cv::Point(median_point.x + 0.5*height, max_row));
 
@@ -474,7 +464,7 @@ PatientData::Ch2NormedData PatientData::get_normalized_2ch(size_t frame_number)
 		}
 	}
 
-	return Ch2NormedData{ ch2_image_wrp, angle, rm_2d, lv_roi, cv::Mat(landmarks, CV_64FC2) };
+	return Ch2NormedData{ ch2_image_wrp, angle, rm_2d, inv_rm_2d, lv_roi, cv::Mat(landmarks, CV_64FC2) };
 }
 
 line_eq_t slices_intersection(const OrientedObject& s1, const OrientedObject& s2)

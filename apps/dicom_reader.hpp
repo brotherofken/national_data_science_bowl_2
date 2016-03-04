@@ -6,6 +6,18 @@
 #include <utility>
 #include <functional>
 
+cv::Point2d operator*(cv::Mat1d M, const cv::Point2d& p)
+{
+	cv::Mat_<double> src(3/*rows*/, 1 /* cols */);
+
+	src(0, 0) = p.x;
+	src(1, 0) = p.y;
+	src(2, 0) = 1.0;
+
+	cv::Mat1d dst = M*src; //USE MATRIX ALGEBRA 
+	return cv::Point2d(dst(0, 0), dst(1, 0));
+}
+
 struct LandmarksAnnotation {
 	LandmarksAnnotation(const std::string& path);
 	std::map<std::string, std::vector<cv::Point2d>> annotations;
@@ -125,6 +137,7 @@ struct PatientData
 		cv::Mat1d image;
 		double andle;
 		cv::Mat rotation_mat;
+		cv::Mat inv_rotation_mat;
 		cv::Rect lv_location;
 		cv::Mat landmarks;
 	};
