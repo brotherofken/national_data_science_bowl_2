@@ -50,12 +50,12 @@ macro(configure_msvc_runtime)
     endif()
   endif()
 endmacro()
-configure_msvc_runtime()
+#configure_msvc_runtime()
 
 find_package(OpenCV REQUIRED)
 
 set(Boost_USE_STATIC_LIBS        ON)
-set(Boost_USE_STATIC_RUNTIME     ON)
+set(Boost_USE_STATIC_RUNTIME     OFF)
 find_package(Boost REQUIRED filesystem program_options system regex)
 
 set(GDCM_USE_FILE "${PROJECT_SOURCE_DIR}/libs/gdcm/lib/gdcm-2.6")

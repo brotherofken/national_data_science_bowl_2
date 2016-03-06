@@ -401,6 +401,73 @@ int main(int argc, char ** argv)
 		return result;
 	};
 
+	// Compute ch2 contours and savetheir data
+	{
+		std::ofstream fout(patient_data.directory + "_ch2_info.txt");
+
+		{
+
+			PatientData::Ch2NormedData ch2_image_normalized = patient_data.get_normalized_2ch(0);
+
+
+			std::vector<size_t> sax_locations_y;
+			for (auto& seq : patient_data.sax_seqs) {
+				fout << seq.name << '\t';
+			}
+			fout << std::endl;
+			
+			for (auto& seq : patient_data.sax_seqs) {
+				const cv::Point2d sax_location = ch2_image_normalized.rotation_mat * patient_data.ch2_seq.point_to_image(seq.intersection.ls2(0));
+				sax_locations_y.push_back(sax_location.y);
+				fout << sax_location.y << '\t';
+			}
+			fout << std::endl;
+			fout << ch2_image_normalized.andle << std::endl;
+			fout << ch2_image_normalized.lv_location.x 	  << "\t"
+				<< ch2_image_normalized.lv_location.y 	  << "\t"
+				<< ch2_image_normalized.lv_location.width << "\t"
+				<< ch2_image_normalized.lv_location.height << std::endl;
+		}
+
+		for (size_t slice_id{}; slice_id < patient_data.ch2_seq.slices.size(); ++slice_id) {
+			PatientData::Ch2NormedData ch2_image_normalized = patient_data.get_normalized_2ch(slice_id);
+			cv::Mat ch2_image_norm_img = ch2_image_normalized.image.clone();
+
+			if (ch2_image_normalized.landmarks.rows) {
+				for (auto& point : cv::Mat2d(ch2_image_normalized.landmarks)) {
+					cv::circle(ch2_image_norm_img, cv::Point(point[0], point[1]), 2, cv::Scalar(1, 0, 1), -1, 8, 0);
+				}
+			}
+
+			cv::Mat1b image1b;
+			ch2_image_normalized.image.convertTo(image1b, image1b.type(), 255);
+
+			cv::merge(std::vector<cv::Mat>(3, ch2_image_norm_img), ch2_image_norm_img);
+
+			BoundingBox bbox = { ch2_image_normalized.lv_location.x, ch2_image_normalized.lv_location.y, ch2_image_normalized.lv_location.width, ch2_image_normalized.lv_location.height };
+			bbox.centroid_x = bbox.start_x + bbox.width / 2.0;
+			bbox.centroid_y = bbox.start_y + bbox.height / 2.0;
+			cv::Mat1d current_shape = ch2_regressor.Predict(image1b, bbox, 15);// cpr_repeats);
+
+			for (int i = 0; i < 15; i++) {
+				cv::Point2d ch2_point_wrp = cv::Point2d(current_shape(i, 0), current_shape(i, 1));
+				cv::Point2d ch2_point = ch2_image_normalized.inv_rotation_mat * cv::Point2d(current_shape(i, 0), current_shape(i, 1));
+				cv::circle(ch2_image_norm_img, cv::Point2d(current_shape(i, 0), current_shape(i, 1)), 1, cv::Scalar(1, 0, 1), -1);
+				fout << ch2_point_wrp.x << '\t' << ch2_point_wrp.y << '\t';
+			}
+			fout << std::endl;
+			fout
+				<< patient_data.ch2_seq.slices[slice_id].pixel_spacing[0] << "\t"
+				<< patient_data.ch2_seq.slices[slice_id].pixel_spacing[0] << std::endl;
+
+			cv::rectangle(ch2_image_norm_img, ch2_image_normalized.lv_location, cv::Scalar(255, 255, 0));
+			cv::imshow("ch2_image_wrp", ch2_image_norm_img);
+			cv::waitKey(1);
+		}
+		fout.close();
+	}
+	//return EXIT_SUCCESS;
+
 	cv::Mat1d filtered_rads_final, rads, areas;
 	{ // Pre-compute landmarks
 		std::vector<std::vector<cv::Vec3d>> points3d(patient_data.sax_seqs[0].slices.size());
@@ -472,6 +539,7 @@ int main(int argc, char ** argv)
 		medians.copyTo(filtered_rads_final, bad_elemets);
 
 		i = 0;
+
 		for (Sequence& seq : patient_data.sax_seqs) {
 			int j{};
 			for (Slice& cur_slice : seq.slices) {
@@ -730,18 +798,21 @@ int main(int argc, char ** argv)
 				draw_line(ch2_image, ch2_slice, inter.l24, cv::Scalar(0, max, 0), 1, 2);
 				//draw_line(ch2_image, ch2_slice, inter.ls2, cv::Scalar(max, 0, 0), 1, 2);
 
+				cv::circle(ch2_image, inter.p_ch2, 2, cv::Scalar(0., max, max), -1);
 				{
 					PatientData::Ch2NormedData ch2_image_normalized = patient_data.get_normalized_2ch(slice_id);
 					cv::Mat ch2_image_norm_img = ch2_image_normalized.image.clone();
-					cv::Mat1b image1b;
-					ch2_image_normalized.image.convertTo(image1b, image1b.type(), 255);
 
-					cv::merge(std::vector<cv::Mat>(3, ch2_image_norm_img), ch2_image_norm_img);
 					if (ch2_image_normalized.landmarks.rows) {
 						for (auto& point : cv::Mat2d(ch2_image_normalized.landmarks)) {
 							cv::circle(ch2_image_norm_img, cv::Point(point[0], point[1]), 2, cv::Scalar(max, 0, max), -1, 8, 0);
 						}
 					}
+
+					cv::Mat1b image1b;
+					ch2_image_normalized.image.convertTo(image1b, image1b.type(), 255);
+
+					cv::merge(std::vector<cv::Mat>(3, ch2_image_norm_img), ch2_image_norm_img);
 					
 					BoundingBox bbox = { ch2_image_normalized.lv_location.x, ch2_image_normalized.lv_location.y, ch2_image_normalized.lv_location.width, ch2_image_normalized.lv_location.height };
 					bbox.centroid_x = bbox.start_x + bbox.width / 2.0;
@@ -750,13 +821,12 @@ int main(int argc, char ** argv)
 
 					for (int i = 0; i < 15; i++) {
 						cv::circle(ch2_image_norm_img, cv::Point2d(current_shape(i, 0), current_shape(i, 1)), 1, cv::Scalar(max, 0, max), -1);
-						cv::circle(ch2_image, ch2_image_normalized.inv_rotation_mat * cv::Point2d(current_shape(i, 0), current_shape(i, 1)), 1, cv::Scalar(0, 0, max), -1);
+						cv::circle(ch2_image, ch2_image_normalized.inv_rotation_mat * cv::Point2d(current_shape(i, 0), current_shape(i, 1)), ch2_image.cols > 256 ? 2 : 1, cv::Scalar(0, 0, max), -1);
 					}
 					cv::rectangle(ch2_image_norm_img, ch2_image_normalized.lv_location, cv::Scalar(255, 255, 0));
 					cv::resize(ch2_image_norm_img, ch2_image_norm_img, cv::Size(), 256. / ch2_image_norm_img.cols, 256. / ch2_image_norm_img.cols);
 					cv::imshow("ch2_image_wrp", ch2_image_norm_img);
 				}
-				cv::circle(ch2_image, inter.p_ch2, 2, cv::Scalar(0., 0., max), -1);
 
 				std::string filename = ch2_slice.filename;
 				filename.erase(0, data_path.size() + 1);

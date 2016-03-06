@@ -204,12 +204,12 @@ int main() {
 #if 1
 
 	const int img_num = 95; // WHATTA
-	const int candidate_pixel_num = 300; // TOO MUCH
+	const int candidate_pixel_num = 400; // TOO MUCH
 	const int fern_pixel_num = 5;
-	const int first_level_num = 10; // cascades
-	const int second_level_num = 300; // trees per cascade
+	const int first_level_num = 10;   // cascades
+	const int second_level_num = 500; // trees per cascade
 	const int landmark_num = 15;
-	const int initial_number = 50;
+	const int initial_number = 75;
 	bool show_train = true;
 
 	for (int i = 0; i < img_num; i++) {
@@ -235,18 +235,18 @@ int main() {
 		images.push_back(image.clone());
 		bounding_box.push_back(BoundingBox(bbox));
 
-		cv::flip(image, image, 1);
-
-		for (size_t r{}; r < landmarks.rows; ++r) {
-			landmarks(r, 0) = image.cols - landmarks(r, 0);
-		}
-
-		bbox.start_x = image.cols - bbox.start_x - bbox.width;
-		bbox.centroid_x = bbox.start_x + bbox.width / 2.0;
-
-		ground_truth_shapes.push_back(landmarks);
-		images.push_back(image.clone());
-		bounding_box.push_back(bbox);
+		//cv::flip(image, image, 1);
+		//
+		//for (size_t r{}; r < landmarks.rows; ++r) {
+		//	landmarks(r, 0) = image.cols - landmarks(r, 0);
+		//}
+		//
+		//bbox.start_x = image.cols - bbox.start_x - bbox.width;
+		//bbox.centroid_x = bbox.start_x + bbox.width / 2.0;
+		//
+		//ground_truth_shapes.push_back(landmarks);
+		//images.push_back(image.clone());
+		//bounding_box.push_back(bbox);
 
 		if (show_train) {
 			cv::Mat test_image_1 = images.back().clone();

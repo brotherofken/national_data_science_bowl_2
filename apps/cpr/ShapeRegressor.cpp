@@ -71,7 +71,7 @@ void ShapeRegressor::Train(const vector<Mat_<uchar> >& images,
             augmented_ground_truth_shapes.push_back(ground_truth_shapes[i]);
 
 			BoundingBox aug_bbox = bounding_box[i];
-			aug_bbox.height *= random_generator.uniform(1., 1.5);// random_generator.uniform(bounding_box[i].height*0.0, bounding_box[i].height * 1.0);
+			aug_bbox.height *= random_generator.uniform(0.5, 1.2);// random_generator.uniform(bounding_box[i].height*0.0, bounding_box[i].height * 1.0);
 			aug_bbox.width *= aug_bbox.height / bounding_box[i].height; // random_generator.uniform(bounding_box[i].width*0.0, bounding_box[i].width * 0.5);
 			aug_bbox.start_x -= (aug_bbox.height - bounding_box[i].height) / 2;
 			aug_bbox.start_y -= (aug_bbox.width - bounding_box[i].width) / 2;
@@ -248,8 +248,13 @@ Mat1d ShapeRegressor::Predict(const Mat1b& image, const BoundingBox& _bounding_b
 					current_shape(r, c) += random_generator.uniform(-0.125, 0.125); // Random jiggling
 				}
 			}
-			//bounding_box.start_y += random_generator.uniform(-orig_bbox.height*0.4, orig_bbox.height * 0.4);
-			//bounding_box.height += random_generator.uniform(-orig_bbox.height*0.4, orig_bbox.height * 0.4);
+			//BoundingBox aug_bbox = bounding_box[i];
+			bounding_box.height *= random_generator.uniform(0.5, 1.0);// random_generator.uniform(bounding_box[i].height*0.0, bounding_box[i].height * 1.0);
+			bounding_box.width *= bounding_box.height / orig_bbox.height; // random_generator.uniform(bounding_box[i].width*0.0, bounding_box[i].width * 0.5);
+			bounding_box.start_x -= (bounding_box.height - orig_bbox.height) / 2;
+			bounding_box.start_y -= (bounding_box.width - orig_bbox.width) / 2;
+			bounding_box.centroid_x = bounding_box.start_x + bounding_box.width / 2.0;
+			bounding_box.centroid_y = bounding_box.start_y + bounding_box.height / 2.0;
 		}
 
 		//BoundingBox current_bounding_box = bounding_box_[index];
