@@ -15,6 +15,7 @@
 const std::string PatientData::AUX_LV_MASK = "lv_mask";
 const std::string PatientData::AUX_CONTOUR = "lv_annotation";
 
+const line_eq_t no_line = [](double) {return cv::Vec3d::all(0); };
 
 namespace fs = ::boost::filesystem;
 
@@ -206,7 +207,16 @@ Slice::Slice(const std::string& _filename)
 }
 
 Sequence::Sequence(const std::string& directory)
-	: empty(false)
+	: OrientedObject{
+		0., //double slice_location;
+		1., //double slice_thickness;
+		cv::Vec3d(1,0,0), //cv::Vec3d row_dc;
+		cv::Vec3d(0,1,0), //cv::Vec3d col_dc;
+		cv::Vec3d(0,0,0), //cv::Vec3d position;
+		cv::Vec3d(1,1,0), //cv::Vec3d pixel_spacing;
+		cv::Mat1d::eye(3, 3) //cv::Mat1d rm;
+	}
+	, empty(false)
 {
 	name = fs::path(directory).stem().string();
 	std::clog << " sequence " << name << " : ";
@@ -282,17 +292,51 @@ PatientData::PatientData(const std::string& _data_path, const std::string& direc
 
 	const bool chamber_views_ok = !ch2_seq.empty && !ch4_seq.empty;
 
-	// Fill intersections
-	if (chamber_views_ok) {
+	// Remove badly oriented saxes
+	{
+		const size_t initial_sax_count = sax_seqs.size();
+		std::map<int, double> angles_hist;// (sax_seqs.size());
 		for (Sequence& sax : sax_seqs) {
-			const cv::Vec3d point_3d = slices_intersection(sax, ch2_seq, ch4_seq);
+			const double some_angle = 180 * std::acos(cv::Vec3d(0, 0, 1).dot(sax.normal()) / cv::norm(sax.normal())) / CV_PI; // I know, I know...
+			if (angles_hist.count(int(some_angle)))
+				angles_hist[int(some_angle)]++;
+			else
+				angles_hist[int(some_angle)] = 1;
+		}
+
+		// find most frequent angle
+		auto pr = std::max_element(angles_hist.begin(), angles_hist.end(),
+				[](const std::pair<int, double>& p1, const std::pair<int, double>& p2) { return p1.second < p2.second; }
+		);
+
+		// Remove poor slices
+		sax_seqs.erase(std::remove_if(sax_seqs.begin(), sax_seqs.end(), [pr](Sequence& sax) {
+			const double some_angle = 180 * std::acos(cv::Vec3d(0, 0, 1).dot(sax.normal()) / cv::norm(sax.normal())) / CV_PI;
+			const bool remove = int(some_angle) != pr->first;
+			if (remove) std::cout << "Remove " << sax.name << " due to bad orientation." << std::endl;
+			return remove;
+		}), sax_seqs.end());
+		std::cout << (initial_sax_count - sax_seqs.size()) << " badly oriented slices were removed" << std::endl;
+	}
+
+	// Fill intersections
+	//if (chamber_views_ok) {
+		for (Sequence& sax : sax_seqs) {
+			line_eq_t ch2ch4_line = slices_intersection(ch2_seq, ch4_seq);
+			line_eq_t saxch2_line = ch2_seq.empty ? no_line : slices_intersection(sax, ch2_seq);
+			line_eq_t saxch4_line = ch4_seq.empty ? no_line : slices_intersection(sax, ch4_seq);
+
+			// Set center of sax if intersection not available...
+			const cv::Vec3d point_3d = chamber_views_ok ? slices_intersection(sax, ch2_seq, ch4_seq) : sax.point_to_3d(cv::Point2d(sax.slices[0].image.cols/2, sax.slices[0].image.rows / 2));
 			sax.intersection = {
-				slices_intersection(ch2_seq, ch4_seq), slices_intersection(sax, ch2_seq), slices_intersection(sax, ch4_seq),
+				ch2ch4_line, saxch2_line, saxch4_line,
 				point_3d,
-				sax.point_to_image(point_3d), ch2_seq.point_to_image(point_3d), ch4_seq.point_to_image(point_3d)
+				sax.point_to_image(point_3d),
+				ch2_seq.empty ? cv::Vec2d::all(0) : ch2_seq.point_to_image(point_3d),
+				ch4_seq.empty ? cv::Vec2d::all(0) : ch4_seq.point_to_image(point_3d)
 			};
 		}
-	}
+	//}
 
 	// Remove duplicated slices
 	const auto compare_vec3i = [](const cv::Vec3i& a) -> bool {

@@ -16,13 +16,42 @@ import xgboost
 import xgboost as xgb
 
 from sklearn import ensemble 
+from sklearn import neighbors
 
 import scipy
 from scipy import signal
 from scipy import stats
 
 # In[]
+def smart_blur(v, sigma):
+    if (v < 100):
+        return 10 * sigma
+    if (v < 200):
+        return 15 * sigma
+    if (v < 400):
+        return 20 * sigma
 
+# In[]
+
+#write_submission_file("submission_naive_features.csv", X_validate, Y_validate, ids_validate, optimal_sigma)
+def write_submission_file(submission_path, X, volumes, ids, optimal_sigma):
+    with open(submission_path, 'wb') as csvfile:
+        fieldnames = ['Id']
+        for i in range(600):
+            fieldnames.append('P' + str(i))
+        
+        writer = csv.writer(csvfile, delimiter=',',quotechar='|', lineterminator='\n')
+        writer.writerow(fieldnames)
+        for i in range(len(volumes)):
+            _,cdf_diastola = gen_cdf(volumes[i], optimal_sigma)
+            id_dias = str(ids[i]) + ('_Systole' if X[i,-1] == 0 else '_Diastole')
+            round_cdf_diastola = ["%.5f" % val for val in cdf_diastola]
+            str_cdf_diastola = map(str, round_cdf_diastola)
+            str_cdf_diastola.insert(0, id_dias)
+            writer.writerow( str_cdf_diastola )
+    return
+
+# In[]
 def norm_cdf(mean=0.0, std=1.0):
     x = np.linspace(0, 599, 600)
     y = stats.norm.cdf(x, loc=mean, scale=std)
@@ -51,15 +80,15 @@ def calc_CRPS(pred_volumes, truth_volumes, sigma):
 def calc_CRPS_best(pred_volumes, truth_volumes):  
     CRPS_n = []
     step = 0.5
-    n_min = 0.1
-    n_max = 30.1
+    n_min = 1.0
+    n_max = 30.0
     count = int((n_max - n_min) / step)
     for n in xrange(1, count, 1):
         label = []
         pred = []
         for i in range(len(pred_volumes)):
             #k_dias = (1.0 - ((100.0 - pred_volumes[i]) / 100.0))**0.95
-            _, cdf_diastola = gen_cdf(pred_volumes[i],((n_min + n*step)))
+            _, cdf_diastola = gen_cdf(pred_volumes[i],smart_blur(pred_volumes[i], (n_min + n*step)))
             pred.append(cdf_diastola)
             _, cdf_data_diastola = gen_cdf(float(truth_volumes[i]),0.01)
             label.append(cdf_data_diastola)
@@ -89,7 +118,7 @@ def calc_crps(y_preds, y_tests):
 def clamp(n, smallest, largest):
     return max(smallest, min(n, largest))
 
-def read_dataset(filename):
+def read_dataset(filename, train_ds = True):
     train_df = pd.read_csv('train.csv')
     
     sys_min, sys_mean, sys_max = np.percentile(train_df['Systole'],[1,50,99])
@@ -134,8 +163,11 @@ def read_dataset(filename):
             sample_sys  = np.append(sample, 0)
             sample_dias = np.append(sample, 1)
             
-            v_sys = float(train_df[train_df['Id']==sample[0]]['Systole'])
-            v_dias = float(train_df[train_df['Id']==sample[0]]['Diastole'])   
+            v_sys = sys_mean
+            v_dias = dias_mean
+            if (train_ds) :            
+                v_sys = float(train_df[train_df['Id']==sample[0]]['Systole'])
+                v_dias = float(train_df[train_df['Id']==sample[0]]['Diastole'])   
             
             if len(X):               
                 X = np.vstack((X, sample_sys))
@@ -193,7 +225,7 @@ X_df = pd.read_csv('data_for_model_train_v2.csv', names=column_names, skiprows=0
 
 # In[]
 
-def train_regressors(X, Y, folds, regressor_factory):
+def train_regressors(X, Y, folds, regressor_factory, normalize = False):
     regressors = []
     y_preds = []
     y_tests = []
@@ -206,6 +238,11 @@ def train_regressors(X, Y, folds, regressor_factory):
         X_test = X[test_id]
         y_train = Y[train_id]
         y_test = Y[test_id]
+        
+        if (normalize):
+            scaler = skl.preprocessing.StandardScaler().fit(X)
+            X_train = scaler.transform(X_train)
+            X_test = scaler.transform(X_test)
         
         reg = regressor_factory()
         regressors.append(reg)
@@ -225,20 +262,28 @@ def gbt_factory():
     return skl.ensemble.GradientBoostingRegressor(n_estimators = 1000, learning_rate=0.1, max_depth=4, random_state=0, loss='huber', subsample=1.0)
 
 def adb_factory():
-    return skl.ensemble.AdaBoostRegressor(base_estimator = skl.tree.DecisionTreeRegressor(max_depth=4), n_estimators=1000, learning_rate = 1., random_state=0, loss='linear')
+    #return skl.ensemble.AdaBoostRegressor(base_estimator = skl.tree.DecisionTreeRegressor(max_depth=4), n_estimators=1000, learning_rate = 0.1, random_state=0, loss='linear')
+    return skl.ensemble.AdaBoostRegressor(base_estimator = skl.linear_model.LinearRegression(), n_estimators=1000, learning_rate = 0.1, random_state=0, loss='linear')
 
+def lin_factory():
+    return skl.linear_model.RANSACRegressor()
+    #return skl.grid_search.GridSearchCV(skl.svm.SVR(kernel='rbf', gamma=0.1), cv=5, param_grid={"C": [1e2, 1e3, 1e4, 1e5], "gamma": np.logspace(-5, 0, 6)})
+    #skl.svm.SVR(kernel='rbf', gamma=0.1)
+    
 
 # In[]
 skf = skl.cross_validation.LabelKFold(map(int, indices), n_folds = 10)
 
 regressors_xgb, y_preds_xgb, y_tests_xgb, test_ids_gxb = train_regressors(X, Y, skf, xgb_factory)
 regressors_gbt, y_preds_gbt, y_tests_gbt, test_ids_gbt = train_regressors(X, Y, skf, gbt_factory)
-regressors_adb, y_preds_adb, y_tests_adb, test_ids_adb = train_regressors(X, Y, skf, adb_factory)
+regressors_adb, y_preds_adb, y_tests_adb, test_ids_adb = train_regressors(X, Y, skf, adb_factory, normalize = True)
+regressors_lin, y_preds_lin, y_tests_lin, test_ids_lin = train_regressors(X, Y, skf, lin_factory, normalize = True)
 
 # In[]
 crps_xgb = calc_crps(y_preds_xgb, y_tests_xgb)
-crps_gbt = calc_crps(y_preds_gbt, y_tests_gbt)
-crps_adb = calc_crps(y_preds_adb, y_tests_adb)
+crps_gbt = calc_crps(y_preds_gbt, y_tests_xgb)
+crps_adb = calc_crps(y_preds_adb, y_tests_xgb)
+crps_lin = calc_crps(y_preds_lin, y_tests_xgb)
 
 # In[]
 t = []
@@ -246,10 +291,42 @@ for a,b in zip(y_preds_xgb, y_preds_gbt):
     t.append((a.ravel()+b.ravel())/2)
 crps_xgbgbt = calc_crps(t, y_tests_gbt)
 
-y_preds_xgb
+print crps_xgb
+print crps_gbt
+#print crps_adb
+print crps_xgbgbt
 
 # In[]
 
+X_stack = np.transpose(np.vstack(map(np.concatenate, [y_preds_xgb, y_preds_gbt]))) #, y_preds_adb, y_preds_lin])))
+Y_stack = Y[np.concatenate(test_ids_gxb)].ravel()
+X_train, X_test, y_train, y_test, idx_train, idx_test = skl.cross_validation.train_test_split(X_stack, Y_stack, np.concatenate(test_ids_gxb), test_size=0.2, random_state=0)
+
+# In[]
+
+reg_stack = skl.linear_model.LinearRegression()
+
+reg_stack.fit(X_train, y_train)
+y_pred = reg_stack.predict(X_test)
+crps, optimal_sigma = calc_CRPS_best(y_pred.ravel(), y_test.ravel())
+calc_CRPS_best(X_test[:,0].ravel(), y_test.ravel())
+calc_CRPS_best(X_test[:,1].ravel(), y_test.ravel())
+print(crps)
+
+t = np.transpose(np.vstack((Y_stack, np.abs(X_stack[:,1].ravel()-Y_stack))))
+
+np.std(t[np.bitwise_and(0 < t[:,0], t[:,0] < 100)][:,1])
+np.std(t[np.bitwise_and(100 < t[:,0], t[:,0] < 200)][:,1])
+np.std(t[np.bitwise_and(200 < t[:,0], t[:,0] < 300)][:,1])
+np.std(t[np.bitwise_and(300 < t[:,0], t[:,0] < 400)][:,1])
+np.std(t[np.bitwise_and(400 < t[:,0], t[:,0] < 500)][:,1])
+
+
+
+
+t = indices[idx_test[np.abs(y_pred-y_test) > 50]]
+
+# In[]
 #idx_test[np.abs(y_pred-y_test)>50]
 
 y_preds = t
@@ -282,11 +359,13 @@ calc_CRPS_best(y_pred.ravel(), y_test.ravel())
 
 # In[] Generate submission
 ​
-X_validate, Y_validate, ids_validate, column_names = read_dataset('data_for_model_validate_v2.csv')
+X_validate, Y_validate, ids_validate, column_names = read_dataset('data_for_model_validate_v2.csv', train_ds = False)
+X_validate_df = pd.read_csv('data_for_model_validate_v2.csv', names=column_names, skiprows=0)
 
-X_validate = filter_X(X_validate, Y_validate, sis_dis_min, sis_dis_mean, sis_dis_max)
-Y_pred = clf.predict(X_validate)
-​
+xgb_preds = np.mean(np.vstack([r.predict(X_validate) for r in regressors_xgb]), axis = 0)
+gbt_preds = np.mean(np.vstack([r.predict(X_validate) for r in regressors_gbt]), axis = 0)
+
+optimal_sigma = 13.5
 # In[]
 #plt.plot(range(len(Y_pred)/2), Y_pred[X_validate[:,0] == 1].ravel(), color = '#0000bb')
 #plt.plot(range(len(Y_pred)/2), Y_pred[X_validate[:,0] == 0].ravel(), color = '#00bb00')
@@ -298,7 +377,7 @@ Y_pred = clf.predict(X_validate)
 ​
 #plt.plot(range(len(Y_pred)/2), Y_pred_80.ravel()- Y_pred.ravel(),'r')
 plt.grid(True)
-write_submission_file("submission_naive_features_full_ds.csv", X_validate, Y_pred.ravel(), ids_validate.ravel(), optimal_sigma)
+write_submission_file("submission_naive_v2.1.csv", X_validate, xgb_preds.ravel(), map(int,ids_validate.ravel()), optimal_sigma)
 ​
 Y_pred[X_validate[:,0] == 1]
 Y_pred[X_validate[:,0] == 0]

@@ -24,6 +24,10 @@ struct LandmarksAnnotation {
 };
 
 using line_eq_t = std::function<cv::Vec3d(double)>;
+
+// Always returns {0,0,0}
+extern const line_eq_t no_line; //= [](double) {return cv::Vec3d::all(0); };
+
 struct Intersection {
 	line_eq_t l24;
 	line_eq_t ls2;
@@ -99,7 +103,15 @@ struct Sequence : public OrientedObject
 		ch4 = 2,
 	};
 
-	Sequence() : empty(true) {}
+	Sequence() : OrientedObject{
+		0., //double slice_location;
+		1., //double slice_thickness;
+		cv::Vec3d(1,0,0), //cv::Vec3d row_dc;
+		cv::Vec3d(0,1,0), //cv::Vec3d col_dc;
+		cv::Vec3d(0,0,0), //cv::Vec3d position;
+		cv::Vec3d(1,1,0), //cv::Vec3d pixel_spacing;
+		cv::Mat1d::eye(3, 3) //cv::Mat1d rm;
+	}, empty(true) {}
 	Sequence(const std::string& directory);
 
 	bool empty;

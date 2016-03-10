@@ -487,7 +487,9 @@ int main(int argc, char ** argv)
 
 				cv::Mat1f imagef;
 				cur_image.convertTo(imagef, imagef.type());
+
 				const double R = get_circle_for_point(imagef, cur_slice.estimated_center);
+
 				cur_slice.aux["R"] = cv::Mat1d(1, 1, R);
 				rads(i, j) = R;
 				j++;
@@ -763,9 +765,13 @@ int main(int argc, char ** argv)
 
 			cur_image.convertTo(cur_image, CV_32FC1);
 			cv::cvtColor(cur_image, cur_image, cv::COLOR_GRAY2BGR);
-			if (!ch2_slice.empty && !ch4_slice.empty) {
+			if (!ch2_slice.empty) {
 				const Intersection& inter = patient_data.sax_seqs[sax_id].intersection;
 				draw_line(cur_image, cur_slice, inter.ls2, cv::Scalar(max, 0, 0), 1, 1);
+				cv::circle(cur_image, inter.p_sax, 2, cv::Scalar(0., 0., max), -1);
+			}
+			if (!ch4_slice.empty) {
+				const Intersection& inter = patient_data.sax_seqs[sax_id].intersection;
 				draw_line(cur_image, cur_slice, inter.ls4, cv::Scalar(max, 0, 0), 1, 1);
 				cv::circle(cur_image, inter.p_sax, 2, cv::Scalar(0., 0., max), -1);
 			}
@@ -785,10 +791,7 @@ int main(int argc, char ** argv)
 			cv::circle(cur_image, cur_slice.estimated_center * scale, 3, cv::Scalar(255, 0, 255), -1, 8, 0);
 			cv::imshow("cur_slice", cur_image);
 
-			if (!ch2_slice.empty && !ch4_slice.empty) {
-
-
-
+			if (!ch2_slice.empty) {
 				const Intersection& inter = patient_data.sax_seqs[sax_id].intersection;
 				cv::Mat ch2_image = ch2_slice.image.clone();
 				const double scale_ch2 = 384. / ch2_image.cols;
@@ -813,7 +816,7 @@ int main(int argc, char ** argv)
 					ch2_image_normalized.image.convertTo(image1b, image1b.type(), 255);
 
 					cv::merge(std::vector<cv::Mat>(3, ch2_image_norm_img), ch2_image_norm_img);
-					
+
 					BoundingBox bbox = { ch2_image_normalized.lv_location.x, ch2_image_normalized.lv_location.y, ch2_image_normalized.lv_location.width, ch2_image_normalized.lv_location.height };
 					bbox.centroid_x = bbox.start_x + bbox.width / 2.0;
 					bbox.centroid_y = bbox.start_y + bbox.height / 2.0;
@@ -843,7 +846,7 @@ int main(int argc, char ** argv)
 					draw_line(ch2_image, ch2_slice, patient_data.sax_seqs[i].intersection.ls2, cv::Scalar(max*0.35, 0, 0), scale_ch2, 1);
 					cv::Vec3d estimated_3d = patient_data.sax_seqs[i].point_to_3d(patient_data.sax_seqs[i].slices[slice_id].estimated_center);
 					cv::circle(ch2_image, patient_data.ch2_seq.point_to_image(estimated_3d) * scale_ch2, 2, cv::Scalar(max, 0, max), -1, 8, 0);
-				
+
 					cv::Mat1d slice_shape = patient_data.sax_seqs[i].slices[slice_id].aux["landmarks"];
 					//for (int j = 0; j < landmark_num; j++) {
 					//	cv::Vec3d estimated_3d = patient_data.sax_seqs[i].slices[slice_id].point_to_3d(cv::Point2d(slice_shape(j, 0), slice_shape(j, 1)));
@@ -852,6 +855,9 @@ int main(int argc, char ** argv)
 				}
 
 				cv::imshow("ch2", ch2_image);
+			}
+			if (!ch4_slice.empty) {
+				const Intersection& inter = patient_data.sax_seqs[sax_id].intersection;
 
 				cv::Mat ch4_image = ch4_slice.image.clone();
 				const double scale_ch4 = 384. / ch4_image.cols;
