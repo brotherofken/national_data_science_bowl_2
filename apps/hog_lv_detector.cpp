@@ -22,29 +22,29 @@ cv::Rect HogLvDetector::detect(const cv::Mat1d& imaged, const cv::Point approxim
 		return cv::norm((r.tl() + r.br()) / 2 - approximate_location);
 	};
 
-
-	//cv::Rect closest_rect = locations.size() ? *std::min_element(locations.begin(), locations.end(), [&](cv::Rect& a, cv::Rect& b) {
-	//	return dist_to_lv(a) < dist_to_lv(b);
-	//}) : cv::Rect();
-	//if (dist_to_lv(closest_rect) < 0.1 * imaged.cols) {
-	//	locations = { closest_rect };
-	//}
-	//else {
-	//	locations = {};
-	//}
-
 	if (draw_lv) {
 		cv::merge(std::vector<cv::Mat1d>(3, draw), draw);
 		draw_locations(draw, locations, trained);
 		cv::imshow("LV_detection", draw);
+		cv::waitKey(1);
 	}
 
-	//if (dist_to_lv(closest_rect) < 0.1 * imaged.cols) {
-	//	return closest_rect;
-	//}
-	//else {
-		return cv::Rect();
-	//}
+	cv::Rect closest_rect = locations.size() ? *std::min_element(locations.begin(), locations.end(), [&](cv::Rect& a, cv::Rect& b) {
+		return dist_to_lv(a) < dist_to_lv(b);
+	}) : cv::Rect();
+	if (dist_to_lv(closest_rect) < 0.1 * imaged.cols) {
+		locations = { closest_rect };
+	}
+	else {
+		locations = {};
+	}
+
+	if (dist_to_lv(closest_rect) < 0.25 * imaged.cols) {
+		return closest_rect;
+	}
+	else {
+		return cv::Rect(approximate_location - cv::Point{10, 10}, approximate_location + cv::Point{10, 10});
+	}
 }
 
 void HogLvDetector::get_svm_detector(const cv::Ptr<cv::ml::SVM>& svm, std::vector<float> & hog_detector)

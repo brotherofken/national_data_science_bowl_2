@@ -12,6 +12,9 @@
 #include <algorithm>
 #include <unordered_map>
 
+
+#include "hog_lv_detector.hpp"
+
 const std::string PatientData::AUX_LV_MASK = "lv_mask";
 const std::string PatientData::AUX_CONTOUR = "lv_annotation";
 
@@ -102,6 +105,22 @@ namespace {
 		min_max = { imin * (min_max.first / 100.), imax * (min_max.second / 100.) };
 
 		return min_max;
+	}
+
+	HogLvDetector lv_detector;// .detect(cv::Mat1d(cur_image), {}, true);
+
+	cv::Point try_locate_lv(const cv::Mat1d& image_)
+	{
+
+		cv::Mat hist;
+		cv::Rect roi = cv::Rect({ 0,0 }, image_.size());
+		const auto minmax = get_quantile_uchar(image_(roi), hist, 0.05, 0.95);
+		cv::Mat1d image = (image_ - minmax.first) / (minmax.second - minmax.first);
+		image.setTo(1, image > 1.0);
+		image.setTo(0, image < 0.0);
+
+		const cv::Rect r = lv_detector.detect(image, cv::Point{ image.cols / 2, image.rows / 2 }, true);
+		return (r.br() + r.tl()) / 2;
 	}
 
 }
@@ -286,7 +305,7 @@ PatientData::PatientData(const std::string& _data_path, const std::string& direc
 	for (Sequence& sax : sax_seqs) {
 		for (Slice& s : sax.slices) {
 			std::string basename = boost::filesystem::basename(boost::filesystem::path(s.filename));
-			s.estimated_center = points.count(basename) ? points[basename] : cv::Point(-1, -1);
+			s.estimated_center = points.count(basename) ? points[basename] : try_locate_lv(s.image);// cv::Point(-1, -1);
 		}
 	}
 
@@ -373,9 +392,11 @@ PatientData::PatientData(const std::string& _data_path, const std::string& direc
 		for (Slice& s : sax.slices) {
 			cv::Mat hist;
 			const double min_size = std::min(s.image.cols, s.image.rows);
-			cv::Rect roi(s.estimated_center - cv::Point(0.2*min_size, 0.2*min_size), cv::Size(0.4*min_size, 0.4*min_size));
+			cv::Rect roi = s.estimated_center == cv::Point(-1, -1) ? 
+				cv::Rect({ 0,0 }, s.image.size()) :
+				cv::Rect(s.estimated_center - cv::Point(0.2*min_size, 0.2*min_size), cv::Size(0.4*min_size, 0.4*min_size));
 			roi = roi & cv::Rect({ 0,0 }, s.image.size());
-			const auto minmax = get_quantile_uchar(s.image(roi), hist, 0.0, 0.9);
+			const auto minmax = get_quantile_uchar(s.image(roi), hist, 0.05, 0.95);
 			s.image = (s.image - minmax.first) / (minmax.second - minmax.first);
 			s.image.setTo(1, s.image > 1.0);
 			s.image.setTo(0, s.image < 0.0);
@@ -458,7 +479,7 @@ void PatientData::save_goodness() const {
 PatientData::Ch2NormedData PatientData::get_normalized_2ch(size_t frame_number)
 {
 	if (ch2_seq.empty) {
-		return Ch2NormedData{ cv::Mat1d(), 0, cv::Mat(), cv::Mat(), cv::Rect(), cv::Mat() };
+		return Ch2NormedData{ cv::Mat1d(), 0, cv::Mat1d::eye(3,3), cv::Mat1d::eye(3,3), cv::Rect(), cv::Mat() };
 	}
 	const Slice& ch2_slice = ch2_seq.slices[frame_number];
 	const Intersection& inter = sax_seqs[sax_seqs.size()/2].intersection; // get intersection from the middle

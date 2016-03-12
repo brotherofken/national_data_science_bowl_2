@@ -481,6 +481,10 @@ int main(int argc, char ** argv)
 		for (Sequence& seq : patient_data.sax_seqs) {
 			int j{};
 			for (Slice& cur_slice : seq.slices) {
+				if (cur_slice.estimated_center == cv::Point(-1, -1)) {
+					cur_slice.aux["R"] = cv::Mat1d(1, 1, -1);
+					continue;
+				}
 				std::cout << " " << seq.name << "/" << cur_slice.frame_number << "\t\t\t\r";
 				cv::Mat cur_image = (cur_slice.image.clone());
 				//cv::resize(cur_image, cur_image, cv::Size(), cur_slice.pixel_spacing[0], cur_slice.pixel_spacing[1], cv::INTER_CUBIC);
@@ -545,6 +549,11 @@ int main(int argc, char ** argv)
 		for (Sequence& seq : patient_data.sax_seqs) {
 			int j{};
 			for (Slice& cur_slice : seq.slices) {
+				if (cur_slice.estimated_center == cv::Point(-1, -1)) {
+					cur_slice.aux["landmarks"] = cv::Mat1d::zeros(1, 2* landmark_num);
+					cur_slice.aux["landmarks_area"] = cv::Mat1d(1, 1, 0.);
+					continue;
+				}
 				cv::Mat cur_image = (cur_slice.image.clone());
 				const double R = filtered_rads_final(i,j);// cur_slice.aux["R"].at<double>(0, 0);
 				BoundingBox lv_bbox;
@@ -560,7 +569,7 @@ int main(int argc, char ** argv)
 				//int prev_slice_id = ((j - 1) < 0 ? seq.slices.size() : j) - 1;
 				//Slice& prev_slice = seq.slices[prev_slice_id];
 				//cv::Mat1d initial_shape = cv::Mat1d();// prev_slice.aux.count("landmarks") > 0 ? prev_slice.aux["landmarks"] : cv::Mat1d();
-				cv::Mat1d current_shape = lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, cpr_repeats) : cv::Mat1d::zeros(1, landmark_num);
+				cv::Mat1d current_shape = lv_bbox.width*lv_bbox.height > 0 ? regressor.Predict(cur_image1b, lv_bbox, cpr_repeats) : cv::Mat1d::zeros(1, 2*landmark_num);
 
 				cur_slice.aux["landmarks"] = current_shape;
 				cur_slice.aux["landmarks_area"] = cv::Mat1d(1, 1, compute_polyon_area(shape2polygon(current_shape, cur_slice.pixel_spacing)));
