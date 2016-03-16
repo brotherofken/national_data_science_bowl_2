@@ -306,6 +306,9 @@ PatientData::PatientData(const std::string& _data_path, const std::string& direc
 		for (Slice& s : sax.slices) {
 			std::string basename = boost::filesystem::basename(boost::filesystem::path(s.filename));
 			s.estimated_center = points.count(basename) ? points[basename] : try_locate_lv(s.image);// cv::Point(-1, -1);
+			if (!cv::Rect({ 0,0 }, s.image.size()).contains(s.estimated_center)) {
+				s.estimated_center = try_locate_lv(s.image);
+			}
 		}
 	}
 
@@ -471,6 +474,23 @@ void PatientData::save_goodness() const {
 		for (const Slice& slice : seq.slices) {
 			if (slice.aux.count("GOOD") != 0) {
 				out << slice.filename << "\t" << slice.aux.at("GOOD").at<int>(0) << std::endl;
+			}
+		}
+	}
+}
+
+void PatientData::save_estimated_points() const {
+	std::string annotation_file_name = this->directory + "_good_estimated_lv.csv";
+	std::ofstream out(annotation_file_name);
+
+	std::cout << "saving estimated centers to " + annotation_file_name << std::endl;
+	for (const Sequence& seq : sax_seqs) {
+		for (const Slice& slice : seq.slices) {
+			if (slice.aux.count("ESTIMATED") != 0) {
+				out
+					<< slice.filename << "\t"
+					<< slice.aux.at("ESTIMATED").at<int>(0) << "\t"
+					<< slice.aux.at("ESTIMATED").at<int>(1) << std::endl;
 			}
 		}
 	}

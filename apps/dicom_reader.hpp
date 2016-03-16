@@ -136,6 +136,7 @@ struct PatientData
 
 	void save_contours() const;
 	void save_goodness() const;
+	void save_estimated_points() const;
 
 	std::string directory;
 	size_t number;

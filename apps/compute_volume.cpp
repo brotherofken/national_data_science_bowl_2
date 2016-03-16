@@ -669,7 +669,10 @@ int main(int argc, char ** argv)
 		const int prev_slice_id = slice_id;
 		bool save_contours = false;
 		bool save_goodness = false;
+		bool save_estimated_lv = false;
+		
 		int marker = -1;
+		int good_estimation = -1;
 		const size_t sequence_len = patient_data.sax_seqs[sax_id].slices.size();
 		switch (key) {
 			case Down: sax_id = std::max(0, sax_id - 1); break;
@@ -684,6 +687,8 @@ int main(int argc, char ** argv)
 			case '4': marker = 11; break;
 			case '5': marker = 10; break;
 			case 'g': save_goodness = true; break;
+			case 'e': good_estimation = 1; break;
+			case 'l': save_estimated_lv = true; break;
 			default: break;
 		}
 
@@ -702,6 +707,17 @@ int main(int argc, char ** argv)
 			// Mark only current
 			if (marker == 11 || marker == 10) {
 				cur_slice.aux["GOOD"] = cv::Mat1i(1, 1, marker - 10);
+			}
+		}
+
+		if (good_estimation != -1) {
+			if (cur_slice.aux.count("ESTIMATED") != 0) {
+				cur_slice.aux.erase("ESTIMATED");
+			} else {
+				cv::Mat1i point(0, 1);
+				point.push_back(int(cur_slice.estimated_center.x));
+				point.push_back(int(cur_slice.estimated_center.y));
+				cur_slice.aux["ESTIMATED"] = point;
 			}
 		}
 
@@ -725,6 +741,10 @@ int main(int argc, char ** argv)
 
 		if (save_goodness) {
 			patient_data.save_goodness();
+		}
+
+		if (save_estimated_lv) {
+			patient_data.save_estimated_points();
 		}
 
 		cv::Mat cur_image = (cur_slice.image.clone());
@@ -796,6 +816,13 @@ int main(int argc, char ** argv)
 			if (cur_slice.aux.count("GOOD") != 0) {
 				cv::rectangle(cur_image, cv::Rect({ 0,0 }, cur_image.size()), cur_slice.aux["GOOD"].at<int>(0) == 1 ? cv::Scalar(0, max, 0) : cv::Scalar(0, 0, max), 4);
 			}
+
+			if (cur_slice.aux.count("ESTIMATED") != 0) {
+				cv::Mat1i(cur_slice.aux["ESTIMATED"]);
+				cv::circle(cur_image, cv::Point(cur_image.cols-10, cur_image.rows - 10), 5, cv::Scalar(0, max, 0), -1);
+			}
+			
+
 
 			cv::circle(cur_image, cur_slice.estimated_center * scale, 3, cv::Scalar(255, 0, 255), -1, 8, 0);
 			cv::imshow("cur_slice", cur_image);

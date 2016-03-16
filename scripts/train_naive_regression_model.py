@@ -12,24 +12,13 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import pandas as pd
 import sklearn as skl
-import xgboost 
-import xgboost as xgb
+import xgboost
 
-from sklearn import ensemble 
-from sklearn import neighbors
+from sklearn import ensemble, cross_validation, neighbors, kernel_ridge
 
 import scipy
 from scipy import signal
 from scipy import stats
-
-# In[]
-def smart_blur(v, sigma):
-    if (v < 100):
-        return 10 * sigma
-    if (v < 200):
-        return 15 * sigma
-    if (v < 400):
-        return 20 * sigma
 
 # In[]
 
@@ -88,7 +77,7 @@ def calc_CRPS_best(pred_volumes, truth_volumes):
         pred = []
         for i in range(len(pred_volumes)):
             #k_dias = (1.0 - ((100.0 - pred_volumes[i]) / 100.0))**0.95
-            _, cdf_diastola = gen_cdf(pred_volumes[i],smart_blur(pred_volumes[i], (n_min + n*step)))
+            _, cdf_diastola = gen_cdf(pred_volumes[i], n_min + n*step)
             pred.append(cdf_diastola)
             _, cdf_data_diastola = gen_cdf(float(truth_volumes[i]),0.01)
             label.append(cdf_data_diastola)
@@ -118,15 +107,14 @@ def calc_crps(y_preds, y_tests):
 def clamp(n, smallest, largest):
     return max(smallest, min(n, largest))
 
-def read_dataset(filename, train_ds = True):
-    train_df = pd.read_csv('train.csv')
-    
+def read_dataset(filename, train_ds = True, train_df = pd.read_csv('train.csv')):
+
     sys_min, sys_mean, sys_max = np.percentile(train_df['Systole'],[1,50,99])
     dias_min, dias_mean, dias_max = np.percentile(train_df['Diastole'],[1,50,99])
     
     ids = np.array([])
     X = np.array([])
-    Y = np.array([])    
+    Y = np.array([])
 
     with open(filename, 'rb') as csvfile:
         fieldnames = ['Patient_Name',
@@ -165,9 +153,9 @@ def read_dataset(filename, train_ds = True):
             
             v_sys = sys_mean
             v_dias = dias_mean
-            if (train_ds) :            
+            if (train_ds) :
                 v_sys = float(train_df[train_df['Id']==sample[0]]['Systole'])
-                v_dias = float(train_df[train_df['Id']==sample[0]]['Diastole'])   
+                v_dias = float(train_df[train_df['Id']==sample[0]]['Diastole'])
             
             if len(X):               
                 X = np.vstack((X, sample_sys))
@@ -217,11 +205,13 @@ if plot_cool_scatter_matrix:
     g.map_diag(sns.kdeplot, lw=3)
     
 # In[]  
-X, Y, indices, column_names = read_dataset('data_for_model_train_v2.csv')
+X_train, Y_train, indices, column_names = read_dataset('train_v3.csv')
+X_val, Y_val, indices_val, column_names_val = read_dataset('valid_v3.csv', train_df = pd.read_csv('validate.csv'))
 #selected_cols=[1,2,3,8,9,10,11,12,13,14,15,16,17,18,19,20,21,23,24,25,26,27,28,29]
 #indices = X[:,0]
 
-X_df = pd.read_csv('data_for_model_train_v2.csv', names=column_names, skiprows=0)
+X_df = pd.read_csv('train_v3.csv', names=['id'] + column_names[:-3], skiprows=0)
+X_validate_df = pd.read_csv('valid_v3.csv', names=['id'] + column_names[:-3], skiprows=0)
 
 # In[]
 
@@ -244,10 +234,14 @@ def train_regressors(X, Y, folds, regressor_factory, normalize = False):
             X_train = scaler.transform(X_train)
             X_test = scaler.transform(X_test)
         
-        reg = regressor_factory()
-        regressors.append(reg)
-        reg.fit(X_train, y_train.ravel()) 
+        #reg = xgb.XGBRegressor(max_depth = 3, learning_rate = 0.1, n_estimators = 1000, seed = 42, objective="reg:linear")
+        reg = regressor_factory().fit(X_train, y_train.ravel())
+        
+        
+        
+        #reg.fit(X_train, y_train.ravel())
         y_pred = reg.predict(X_test)
+        regressors.append(reg)
         y_preds.append(y_pred.ravel())
         y_tests.append(y_test.ravel())
         test_ids.append(test_id.ravel())
@@ -256,7 +250,7 @@ def train_regressors(X, Y, folds, regressor_factory, normalize = False):
     return regressors, y_preds, y_tests, test_ids
 
 def xgb_factory():
-    return xgb.XGBRegressor(max_depth = 3, learning_rate = 0.1, n_estimators = 1000, seed = 0, objective="reg:linear")
+    return xgboost.XGBRegressor(base_score = 100., max_depth = 5, learning_rate = float(0.1), n_estimators = 1000, seed = 0, objective='reg:linear')
 
 def gbt_factory():
     return skl.ensemble.GradientBoostingRegressor(n_estimators = 1000, learning_rate=0.1, max_depth=4, random_state=0, loss='huber', subsample=1.0)
@@ -265,36 +259,45 @@ def adb_factory():
     #return skl.ensemble.AdaBoostRegressor(base_estimator = skl.tree.DecisionTreeRegressor(max_depth=4), n_estimators=1000, learning_rate = 0.1, random_state=0, loss='linear')
     return skl.ensemble.AdaBoostRegressor(base_estimator = skl.linear_model.LinearRegression(), n_estimators=1000, learning_rate = 0.1, random_state=0, loss='linear')
 
-def lin_factory():
-    return skl.linear_model.RANSACRegressor()
-    #return skl.grid_search.GridSearchCV(skl.svm.SVR(kernel='rbf', gamma=0.1), cv=5, param_grid={"C": [1e2, 1e3, 1e4, 1e5], "gamma": np.logspace(-5, 0, 6)})
-    #skl.svm.SVR(kernel='rbf', gamma=0.1)
-    
+def krr_factory():
+    #return skl.kernel_ridge.KernelRidge(alpha=1.0)
+    return skl.linear_model.Ridge(alpha = 0.001, normalize = True)
+
+def svr_factory():
+    return skl.grid_search.GridSearchCV(skl.svm.SVR(kernel='rbf', gamma=0.1), cv=5, param_grid={"C": [1e2, 1e3, 1e4, 1e5], "gamma": np.logspace(-5, 0, 6)})
 
 # In[]
 skf = skl.cross_validation.LabelKFold(map(int, indices), n_folds = 10)
 
-regressors_xgb, y_preds_xgb, y_tests_xgb, test_ids_gxb = train_regressors(X, Y, skf, xgb_factory)
-regressors_gbt, y_preds_gbt, y_tests_gbt, test_ids_gbt = train_regressors(X, Y, skf, gbt_factory)
-regressors_adb, y_preds_adb, y_tests_adb, test_ids_adb = train_regressors(X, Y, skf, adb_factory, normalize = True)
-regressors_lin, y_preds_lin, y_tests_lin, test_ids_lin = train_regressors(X, Y, skf, lin_factory, normalize = True)
+regressors_xgb, y_preds_xgb, y_tests_xgb, test_ids_xgb = train_regressors(X_train, Y_train, skf, xgb_factory)
+regressors_gbt, y_preds_gbt, y_tests_gbt, test_ids_gbt = train_regressors(X_train, Y_train, skf, gbt_factory)
+#regressors_adb, y_preds_adb, y_tests_adb, test_ids_adb = train_regressors(X, Y, skf, adb_factory, normalize = True)
+regressors_krr, y_preds_krr, y_tests_krr, test_ids_krr = train_regressors(X_train, Y_train, skf, krr_factory)
+#regressors_svr, y_preds_svr, y_tests_svr, test_ids_svr = train_regressors(X_train, Y_train, skf, svr_factory, normalize = True)
 
 # In[]
 crps_xgb = calc_crps(y_preds_xgb, y_tests_xgb)
 crps_gbt = calc_crps(y_preds_gbt, y_tests_xgb)
-crps_adb = calc_crps(y_preds_adb, y_tests_xgb)
-crps_lin = calc_crps(y_preds_lin, y_tests_xgb)
+#crps_adb = calc_crps(y_preds_adb, y_tests_xgb)
+crps_krr = calc_crps(y_preds_krr, y_tests_xgb)
+#crps_lin = calc_crps(y_preds_lin, y_tests_xgb)
 
 # In[]
-t = []
-for a,b in zip(y_preds_xgb, y_preds_gbt):
-    t.append((a.ravel()+b.ravel())/2)
-crps_xgbgbt = calc_crps(t, y_tests_gbt)
 
-print crps_xgb
-print crps_gbt
-#print crps_adb
-print crps_xgbgbt
+def ensemble_predicts(ensemble, X):
+    return [np.reshape(r.predict(X), (len(X),1)) for r in ensemble]
+
+def ensemble_predict(ensemble, X):
+    return np.mean(np.hstack([np.reshape(r.predict(X), (len(X),1)) for r in ensemble]), axis=1).ravel()
+
+yv_preds_xgb = ensemble_predict(regressors_xgb, X_val)
+yv_preds_gbt = ensemble_predict(regressors_gbt, X_val)
+yv_preds_krr = ensemble_predict(regressors_krr, X_val)
+
+print calc_CRPS_best(yv_preds_xgb, Y_val)
+print calc_CRPS_best(yv_preds_gbt, Y_val)
+print calc_CRPS_best(yv_preds_krr, Y_val)
+print calc_CRPS_best((yv_preds_xgb+yv_preds_gbt)/2, Y_val)
 
 # In[]
 
@@ -360,7 +363,6 @@ calc_CRPS_best(y_pred.ravel(), y_test.ravel())
 # In[] Generate submission
 ​
 X_validate, Y_validate, ids_validate, column_names = read_dataset('data_for_model_validate_v2.csv', train_ds = False)
-X_validate_df = pd.read_csv('data_for_model_validate_v2.csv', names=column_names, skiprows=0)
 
 xgb_preds = np.mean(np.vstack([r.predict(X_validate) for r in regressors_xgb]), axis = 0)
 gbt_preds = np.mean(np.vstack([r.predict(X_validate) for r in regressors_gbt]), axis = 0)
