@@ -1,8 +1,8 @@
 #  Second Annual Data Science Bowl solution #
 
-Due to organizational mistakes in second phase our team was hihgly overfitted and finished on 168th place.
+Due to organizational mistakes in second phase our team hihgly overfitted and finished on 168th place.
 
-Without making such mistake we were chances to place near to the 50th position.
+Without making such mistakes we had chances to place near to the 50th position.
 
 <img src="slides/img/reality.png" width="300" />
 
