@@ -1,6 +1,6 @@
 #  Second Annual Data Science Bowl solution #
 
-Due to organizational mistakes in second phase our team hihgly overfitted and finished on 168th place.
+Due to organizational mistakes in second phase our team highly overfitted and finished on 168th place.
 
 Without making such mistakes we had chances to place near to the 50th position.
 
@@ -23,7 +23,7 @@ Here is an animation of landmark tracking on SAX view.
 <img src="slides/img/patient_10_slice_7.gif" width="400" />
 
 
-Also we made some experiments on 3D reconstruction using MeshLab software.
+We also made some experiments on 3D reconstruction using MeshLab software.
 
 <img src="slides/img/lv1.png" width="400" />
 
